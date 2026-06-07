@@ -22,6 +22,14 @@ import urllib.request
 
 from .store import DEFAULT_DIM
 
+def _warn_if_remote(host: str) -> None:
+    """Guard the zero-egress promise: warn if Ollama isn't on loopback."""
+    if not any(h in host for h in ("127.0.0.1", "localhost", "0.0.0.0", "::1")):
+        import warnings
+        warnings.warn(f"OLLAMA_HOST={host} is not loopback — code/queries leave this machine.",
+                      stacklevel=3)
+
+
 _TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9]*")
 _CAMEL_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
@@ -69,6 +77,7 @@ class OllamaEmbedder:
         self.name = f"ollama:{model}"
         self.model = model
         self.host = (host or os.environ.get("OLLAMA_HOST") or "http://127.0.0.1:11434").rstrip("/")
+        _warn_if_remote(self.host)
         self.dim = dim
 
     def embed(self, text: str) -> list[float]:

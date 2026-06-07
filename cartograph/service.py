@@ -8,6 +8,7 @@ Ollama vectors). Retrieval reads only the graph — never source files.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from .embed import get_embedder
@@ -29,16 +30,21 @@ def embedder_from_store(store: Store):
 class CartographService:
     """Opens a graph once and answers structural/semantic queries."""
 
-    def __init__(self, db_path: str | Path, embedder=None):
+    def __init__(self, db_path: str | Path, embedder=None, reranker=None):
         if not Path(db_path).exists():
             raise FileNotFoundError(f"no graph at {db_path}; run `cartograph index` first")
         self.store = Store(db_path)
         if embedder is None:
             embedder = embedder_from_store(self.store)
-        self.retriever = Retriever(self.store, embedder=embedder)
-        # `rerank` is only offered if the retriever supports it (M2 reranker, PR #6).
+        # Build a reranker from env (CARTOGRAPH_RERANKER=ollama, CARTOGRAPH_RERANK_MODEL=...)
+        # so `rerank` mode actually reranks instead of silently degrading to hybrid.
+        if reranker is None and os.environ.get("CARTOGRAPH_RERANKER"):
+            from .rerank import get_reranker
+            reranker = get_reranker()
+        self.retriever = Retriever(self.store, embedder=embedder, reranker=reranker)
         self.modes = {"vector", "graph", "lexical", "hybrid"}
-        if hasattr(self.retriever, "reranked"):
+        # Only advertise `rerank` when a reranker is actually wired in.
+        if reranker is not None and hasattr(self.retriever, "reranked"):
             self.modes.add("rerank")
 
     def close(self) -> None:

@@ -4,6 +4,10 @@ Parses `CREATE TABLE` statements with sqlglot (optional `sql` extra) into `table
 `column` nodes, `CONTAINS` (table -> column) and `REFERENCES` (FK column -> referenced
 table) edges. This lands app code and DB schema in *one* graph — the SPEC differentiator.
 FK edges are deterministic, so they're tagged EXTRACTED. No network.
+
+Table identity is schema-qualified (`schema.table`) so same-named tables in different
+schemas don't collide; nodes are deduped so repeated / `IF NOT EXISTS` DDL (migrations)
+doesn't produce duplicate primary keys.
 """
 
 from __future__ import annotations
@@ -18,25 +22,31 @@ def _sha(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()
 
 
-def _table_node(name: str, cols: list[tuple[str, str]], rel_path: str, line: int) -> Node:
+def _qual(tbl) -> str:
+    """Schema/catalog-qualified table name, e.g. 'analytics.users' (or 'users')."""
+    parts = [getattr(tbl, "catalog", "") or "", getattr(tbl, "db", "") or "", tbl.name]
+    return ".".join(p for p in parts if p)
+
+
+def _table_node(qual: str, bare: str, cols: list[tuple[str, str]], rel_path: str, line: int) -> Node:
     col_summary = ", ".join(f"{c} {t}".strip() for c, t in cols)
     return Node(
-        id=f"{rel_path}::table.{name}",
+        id=f"{rel_path}::table.{qual}",
         kind="table",
-        name=name,
-        qualified_name=name,
+        name=bare,
+        qualified_name=qual,
         module=rel_path,
         file_path=rel_path,
         start_line=line,
         end_line=line,
-        signature=f"TABLE {name} ({col_summary})",
-        embed_text=f"table {name}\ncolumns: {col_summary}",
-        content_sha=_sha(f"{name}|{col_summary}"),
+        signature=f"TABLE {qual} ({col_summary})",
+        embed_text=f"table {qual}\ncolumns: {col_summary}",
+        content_sha=_sha(f"{qual}|{col_summary}"),
     )
 
 
-def _column_node(table: str, col: str, ctype: str, rel_path: str, line: int) -> Node:
-    qn = f"{table}.{col}"
+def _column_node(table_qual: str, col: str, ctype: str, rel_path: str, line: int) -> Node:
+    qn = f"{table_qual}.{col}"
     return Node(
         id=f"{rel_path}::table.{qn}",
         kind="column",
@@ -54,7 +64,7 @@ def _column_node(table: str, col: str, ctype: str, rel_path: str, line: int) -> 
 
 def extract_sql_source(source: str, rel_path: str, dialect: str | None = None):
     """Returns (nodes, contains_edges, pending_fks) for one SQL file.
-    pending_fks: list of (fk_column_node_id, referenced_table_name)."""
+    pending_fks: list of (fk_column_node_id, referenced_table_qualified_name)."""
     import sqlglot
     from sqlglot import exp
 
@@ -63,7 +73,9 @@ def extract_sql_source(source: str, rel_path: str, dialect: str | None = None):
     pending_fks: list[tuple[str, str]] = []
     try:
         statements = sqlglot.parse(source, read=dialect)
-    except Exception:
+    except Exception as exc:
+        import warnings
+        warnings.warn(f"SQL parse failed for {rel_path} ({exc}); skipping. Try a --dialect.", stacklevel=2)
         return nodes, edges, pending_fks
 
     for stmt in statements:
@@ -72,61 +84,73 @@ def extract_sql_source(source: str, rel_path: str, dialect: str | None = None):
         tbl = stmt.find(exp.Table)
         if tbl is None:
             continue
-        tname = tbl.name
+        qual = _qual(tbl)
         line = (stmt.meta or {}).get("line", 0) or 0
         col_defs = list(stmt.find_all(exp.ColumnDef))
         cols = [(c.name, (c.args.get("kind").sql() if c.args.get("kind") else "")) for c in col_defs]
-        table = _table_node(tname, cols, rel_path, line)
+        table = _table_node(qual, tbl.name, cols, rel_path, line)
         nodes.append(table)
         col_ids: dict[str, str] = {}
         for c, t in cols:
-            cn = _column_node(tname, c, t, rel_path, line)
+            cn = _column_node(qual, c, t, rel_path, line)
             nodes.append(cn)
             col_ids[c] = cn.id
             edges.append(Edge("CONTAINS", table.id, cn.id, EXTRACTED))
 
-        # FKs: table-level FOREIGN KEY (...) REFERENCES t, and inline col REFERENCES t.
-        def _ref_table(node) -> str | None:
-            ref = node.args.get("reference") if hasattr(node, "args") else None
-            target = (ref or node).find(exp.Table)
-            return target.name if target is not None else None
-
         for fk in stmt.find_all(exp.ForeignKey):
-            rt = _ref_table(fk)
-            local = [i.name for i in fk.expressions]
-            for lc in local:
-                src = col_ids.get(lc, table.id)
-                if rt:
-                    pending_fks.append((src, rt))
+            ref = fk.args.get("reference")
+            target = ref.find(exp.Table) if ref is not None else None
+            if target is None:
+                continue
+            for lc in (i.name for i in fk.expressions):
+                pending_fks.append((col_ids.get(lc, table.id), _qual(target)))
         for cdef in col_defs:
             for r in cdef.find_all(exp.Reference):
                 target = r.find(exp.Table)
                 if target is not None:
-                    pending_fks.append((col_ids.get(cdef.name, table.id), target.name))
+                    pending_fks.append((col_ids.get(cdef.name, table.id), _qual(target)))
 
     return nodes, edges, pending_fks
 
 
 def extract_sql_paths(paths: list[Path], root: Path, dialect: str | None = None) -> Graph:
     pkg_parent = root.parent if (root.is_dir() or root.is_file()) else root
-    all_nodes: list[Node] = []
-    all_edges: list[Edge] = []
+    raw_nodes: list[Node] = []
+    raw_edges: list[Edge] = []
     pending: list[tuple[str, str]] = []
     for path in paths:
         rel = path.relative_to(pkg_parent).as_posix() if path.is_relative_to(pkg_parent) else path.name
         nodes, edges, fks = extract_sql_source(path.read_text(encoding="utf-8", errors="replace"), rel, dialect)
-        all_nodes.extend(nodes)
-        all_edges.extend(edges)
+        raw_nodes.extend(nodes)
+        raw_edges.extend(edges)
         pending.extend(fks)
 
-    table_index = {n.qualified_name: n for n in all_nodes if n.kind == "table"}
-    seen = {(e.type, e.src, e.dst) for e in all_edges}
-    for src_id, ref_table in pending:
-        tgt = table_index.get(ref_table)
-        if tgt is None:
+    # Dedup nodes (repeated / IF NOT EXISTS DDL) — first definition wins.
+    by_id: dict[str, Node] = {}
+    for n in raw_nodes:
+        by_id.setdefault(n.id, n)
+    nodes = list(by_id.values())
+
+    # Resolve FKs by qualified name, falling back to bare table name.
+    by_qual = {n.qualified_name: n for n in nodes if n.kind == "table"}
+    by_bare: dict[str, Node] = {}
+    for n in nodes:
+        if n.kind == "table":
+            by_bare.setdefault(n.name, n)
+
+    seen: set[tuple[str, str, str]] = set()
+    edges: list[Edge] = []
+    for e in raw_edges:
+        key = (e.type, e.src, e.dst)
+        if e.src in by_id and e.dst in by_id and key not in seen:
+            seen.add(key)
+            edges.append(e)
+    for src_id, ref in pending:
+        tgt = by_qual.get(ref) or by_bare.get(ref.rsplit(".", 1)[-1])
+        if tgt is None or src_id not in by_id:
             continue
         key = ("REFERENCES", src_id, tgt.id)
         if key not in seen:
             seen.add(key)
-            all_edges.append(Edge("REFERENCES", src_id, tgt.id, EXTRACTED))
-    return Graph(nodes=all_nodes, edges=all_edges)
+            edges.append(Edge("REFERENCES", src_id, tgt.id, EXTRACTED))
+    return Graph(nodes=nodes, edges=edges)

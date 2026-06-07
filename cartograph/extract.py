@@ -300,13 +300,17 @@ def _resolve_calls_jedi(extractors, paths, pkg_parent, by_id, qual_index, heuris
             script = jedi.Script(code=fx.src.decode("utf-8", "replace"), path=str(path), project=project)
         except Exception:
             script = None
+        src_lines = fx.src.split(b"\n")
         for caller_id, name, is_self, row, col in fx.calls:
             caller = by_id.get(caller_id)
             target_ids: list[str] | None = None
             jedi_decided = False
             if script is not None:
+                # tree-sitter gives a byte column; Jedi wants a character column.
+                line_bytes = src_lines[row] if row < len(src_lines) else b""
+                char_col = len(line_bytes[:col].decode("utf-8", "replace"))
                 try:
-                    defs = script.goto(row + 1, col, follow_imports=True)
+                    defs = script.goto(row + 1, char_col, follow_imports=True)
                 except Exception:
                     defs = []
                 if defs:
@@ -382,6 +386,12 @@ def extract_paths(paths: list[Path], root: Path, resolver: str = "heuristic") ->
             edges.append(Edge("CALLS", caller_id, target_id, INFERRED, resolver_tag))
 
     if resolver == "jedi":
+        try:
+            import jedi  # noqa: F401
+        except ModuleNotFoundError as exc:
+            raise ModuleNotFoundError(
+                "resolver='jedi' needs the 'resolve' extra: uv sync --extra resolve"
+            ) from exc
         _resolve_calls_jedi(extractors, paths, pkg_parent, by_id, qual_index,
                             _heuristic_targets, _add_call)
     else:
