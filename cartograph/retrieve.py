@@ -156,18 +156,22 @@ class Retriever:
         return rrf_fuse(rankings, k=k, rrf_k=rrf_k)
 
     # -- rerank (second stage) ------------------------------------------------
-    def reranked(self, query: str, k: int = 10, pool: int = 20) -> list[tuple[str, float]]:
-        """Fuse, then reorder the top `pool` with the reranker. Falls back to the
-        fused order if no reranker is configured."""
+    def reranked(self, query: str, k: int = 10, pool: int = 20, rrf_k: int = 60) -> list[tuple[str, float]]:
+        """Fuse, then re-order the top `pool` with the reranker.
+
+        The LLM's ordering is *blended* with the retrieval order via RRF rather than
+        trusted blindly: this keeps the reranker's top-rank gains (MRR/precision)
+        while the retrieval consensus — which includes BM25's exact-match strength —
+        protects recall@k from a reranker that under-values exact symbol matches.
+        Falls back to the fused order if no reranker is configured.
+        """
         fused = self.hybrid(query, k=pool)
         if not self.reranker or not fused:
             return fused[:k]
-        candidates = [(cid, self.text_by_id.get(cid, "")) for cid, _ in fused]
-        order = self.reranker.rerank(query, candidates)
-        rank_of = {cid: i for i, cid in enumerate(order)}
-        # Descending score so callers/printers stay consistent with other modes.
-        reordered = sorted(fused, key=lambda x: rank_of.get(x[0], len(order)))
-        return [(cid, float(len(reordered) - i)) for i, (cid, _) in enumerate(reordered)][:k]
+        fused_order = [cid for cid, _ in fused]
+        candidates = [(cid, self.text_by_id.get(cid, "")) for cid in fused_order]
+        llm_order = self.reranker.rerank(query, candidates)
+        return rrf_fuse([llm_order, fused_order], k=k, rrf_k=rrf_k)
 
     def retrieve(self, query: str, mode: str = "hybrid", k: int = 10) -> list[tuple[str, float]]:
         return {
