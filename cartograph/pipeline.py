@@ -40,10 +40,55 @@ def build_graph(path: Path, resolver: str = "heuristic") -> Graph:
             graph.edges.extend(schema.edges)
         except ModuleNotFoundError:
             pass  # sqlglot not installed; skip SQL (install with `--extra sql`)
+    _extract_embedded_sql(graph)
     _bridge_models_to_tables(graph)
     if not graph.nodes:
         raise FileNotFoundError(f"no Python or SQL files under {path}")
     return graph
+
+
+def _extract_embedded_sql(graph: Graph) -> None:
+    """Pull SQL out of Python string literals: CREATE TABLE -> table/column nodes,
+    DML -> QUERIES edges (function -> table). The bridge for raw-SQL (non-ORM) apps."""
+    from .model import EXTRACTED, Edge
+
+    units = [u for n in graph.nodes for u in n.extra.get("sql", [])]
+    if not units:
+        return
+    try:
+        from .sql_extract import extract_embedded_sql
+    except ModuleNotFoundError:
+        return  # sqlglot not installed
+    new_nodes, contains, pending_fks, pending_queries = extract_embedded_sql(units)
+
+    by_qual = {n.qualified_name: n for n in graph.nodes if n.kind == "table"}
+    by_id = {n.id for n in graph.nodes}
+    for n in new_nodes:  # dedup tables/cols already present (e.g. also in a .sql file)
+        if n.id not in by_id and n.qualified_name not in (by_qual if n.kind == "table" else {}):
+            graph.nodes.append(n)
+            by_id.add(n.id)
+            if n.kind == "table":
+                by_qual[n.qualified_name] = n
+    valid = by_id
+    seen = {(e.type, e.src, e.dst) for e in graph.edges}
+    for e in contains:
+        if e.src in valid and e.dst in valid and (e.type, e.src, e.dst) not in seen:
+            seen.add((e.type, e.src, e.dst))
+            graph.edges.append(e)
+    by_name = {}
+    for n in graph.nodes:
+        if n.kind == "table":
+            by_name.setdefault(n.name, n)
+    for src_id, ref in pending_fks:
+        tgt = by_qual.get(ref) or by_name.get(ref.rsplit(".", 1)[-1])
+        if tgt and src_id in valid and ("REFERENCES", src_id, tgt.id) not in seen:
+            seen.add(("REFERENCES", src_id, tgt.id))
+            graph.edges.append(Edge("REFERENCES", src_id, tgt.id, EXTRACTED))
+    for owner_id, ref in pending_queries:
+        tgt = by_qual.get(ref) or by_name.get(ref.rsplit(".", 1)[-1])
+        if tgt and owner_id in valid and ("QUERIES", owner_id, tgt.id) not in seen:
+            seen.add(("QUERIES", owner_id, tgt.id))
+            graph.edges.append(Edge("QUERIES", owner_id, tgt.id, EXTRACTED))
 
 
 def _bridge_models_to_tables(graph: Graph) -> None:

@@ -22,6 +22,12 @@ _PARSER = Parser(_LANGUAGE)
 # Inline rationale markers become their own `rationale` nodes (WHY-mode retrieval).
 _MARKER_RE = re.compile(r"#\s*(NOTE|WHY|HACK|XXX|TODO|FIXME|IMPORTANT)\b", re.IGNORECASE)
 
+# SQL embedded in Python string literals (raw-SQL apps: sqlite/psycopg/etc.).
+_SQL_RE = re.compile(
+    r"\b(create\s+table|insert\s+into|delete\s+from|update\s+\w+\s+set|select\b[\s\S]*?\bfrom)\b",
+    re.IGNORECASE,
+)
+
 
 def _text(src: bytes, node: TSNode) -> str:
     return src[node.start_byte : node.end_byte].decode("utf-8", "replace")
@@ -93,6 +99,7 @@ class _FileExtractor:
         self.calls: list[tuple[str, str, bool, int, int]] = []  # (caller_id, name, is_self, row, col)
         self.bases: list[tuple[str, str]] = []  # (class_id, base_name)
         self.imports: list[tuple[str, str]] = []  # (module_id, imported_name)
+        self.sql_strings: list[tuple[str, str]] = []  # (owner_id, sql_text) — SQL in string literals
 
     # -- node factory ---------------------------------------------------------
     def _add(self, kind: str, name: str, qualified_name: str, node: TSNode, body: TSNode | None) -> Node:
@@ -164,6 +171,9 @@ class _FileExtractor:
         )
         self.nodes.append(module_node)
         self._walk(root, parent_id=module_node.id, class_qual=None)
+        self._collect_sql(root, module_node.id)  # top-level SQL (skips def bodies)
+        if self.sql_strings:
+            module_node.extra["sql"] = [(oid, self.rel_path, txt) for oid, txt in self.sql_strings]
 
     def _walk(self, node: TSNode, parent_id: str, class_qual: str | None) -> None:
         for child in node.children:
@@ -236,8 +246,21 @@ class _FileExtractor:
         self._scan_comments(node, fn.id)
         if body is not None:
             self._collect_calls(body, fn.id)
+            self._collect_sql(body, fn.id)
             # Nested defs / classes inside the function body.
             self._walk(body, parent_id=fn.id, class_qual=class_qual)
+
+    def _collect_sql(self, node: TSNode, owner_id: str) -> None:
+        """Record string literals that contain SQL, owned by the enclosing def/module."""
+        if node.type == "string":
+            text = _clean_docstring(_text(self.src, node))
+            if _SQL_RE.search(text):
+                self.sql_strings.append((owner_id, text))
+            return
+        for child in node.children:
+            if child.type in ("function_definition", "class_definition"):
+                continue  # nested defs own their own SQL
+            self._collect_sql(child, owner_id)
 
     def _collect_calls(self, node: TSNode, caller_id: str) -> None:
         if node.type == "call":
