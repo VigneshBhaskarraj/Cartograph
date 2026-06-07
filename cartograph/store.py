@@ -123,6 +123,17 @@ class Store:
             return None  # older DB without the Meta table
         return res.get_next()[0] if res.has_next() else None
 
+    def all_meta(self) -> dict[str, str]:
+        try:
+            res = self.conn.execute("MATCH (m:Meta) RETURN m.key, m.value")
+        except RuntimeError:
+            return {}
+        out: dict[str, str] = {}
+        while res.has_next():
+            r = res.get_next()
+            out[r[0]] = r[1]
+        return out
+
     def set_embedding(self, node_id: str, vector: list[float]) -> None:
         self.conn.execute(
             "MATCH (c:CodeNode {id:$id}) SET c.embedding = $emb",
