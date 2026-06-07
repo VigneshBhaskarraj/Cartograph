@@ -26,12 +26,20 @@ Modes: `vector`, `graph`, `lexical`, `hybrid` (RRF fusion). The default embedder
 offline feature-hash model — set `CARTOGRAPH_EMBEDDER=ollama` for real local semantic
 embeddings (still zero egress; only talks to `127.0.0.1`).
 
+### Use it from Claude Code (MCP)
+```bash
+uv sync --extra mcp
+uv run cartograph serve --db cartograph-out/graph.kuzu     # stdio MCP server
+```
+Exposes `query` / `semantic_search` / `get_node` / `neighbors` / `shortest_path` so an
+agent queries structure instead of grepping. Wiring + tool reference: [`docs/mcp.md`](./docs/mcp.md).
+
 ## Status / roadmap
 - [x] M0 — vertical slice (extract → store → embed → query, one Python file → httpx)
 - [x] M1 — evaluation harness (21 questions over `httpx`, recall@k / precision@k / MRR, per-mode)
 - [~] M2 — hybrid retrieval + reranker (RRF fusion + personalized-PageRank graph landed; reranker pending)
 - [ ] M3 — real symbol resolution (SCIP / stack-graphs)
-- [ ] M4 — MCP server, incremental updates, SQL-schema-in-graph
+- [~] M4 — MCP server ✅ (query/get_node/neighbors/shortest_path/semantic_search); incremental updates + SQL-schema-in-graph pending
 
 **Latest eval** (httpx==0.27.2). With **real local embeddings** (`nomic-embed-text` via
 Ollama) the vector leg reaches recall@10 **0.81** / MRR **0.52** / SEMANTIC **0.71**;

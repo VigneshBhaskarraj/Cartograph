@@ -70,6 +70,24 @@ def demo(
 
 
 @app.command()
+def serve(db: str = typer.Option(DEFAULT_DB, help="Kuzu DB path to serve.")) -> None:
+    """Run the MCP server (stdio) exposing the graph to coding agents.
+
+    Requires the optional `mcp` extra: `uv sync --extra mcp`.
+    """
+    import os
+
+    os.environ.setdefault("CARTOGRAPH_DB", db)
+    from .mcp_server import main as serve_main
+
+    try:
+        serve_main()
+    except ModuleNotFoundError:  # pragma: no cover - mcp extra absent
+        typer.echo("MCP SDK not installed. Run: uv sync --extra mcp", err=True)
+        raise typer.Exit(1)
+
+
+@app.command()
 def stats(db: str = typer.Option(DEFAULT_DB, help="Kuzu DB path.")) -> None:
     """Print node/edge counts for an indexed graph."""
     store = Store(db)

@@ -33,6 +33,10 @@ def schema_ddl(dim: int = DEFAULT_DIM) -> list[str]:
         "CREATE REL TABLE IMPORTS (FROM CodeNode TO CodeNode, confidence STRING)",
         "CREATE REL TABLE CONTAINS (FROM CodeNode TO CodeNode)",
         "CREATE REL TABLE DOCUMENTS (FROM CodeNode TO CodeNode)",
+        # Key/value metadata (e.g. which embedder produced the vectors) so readers
+        # can reconstruct the matching query-time embedder. Keeps the graph the
+        # single source of truth — no sidecar files.
+        "CREATE NODE TABLE Meta (key STRING, value STRING, PRIMARY KEY (key))",
     ]
 
 
@@ -105,6 +109,18 @@ class Store:
             q = (f"MATCH (a:CodeNode {{id:$s}}),(b:CodeNode {{id:$d}}) "
                  f"CREATE (a)-[:{e.type}]->(b)")
             self.conn.execute(q, {"s": e.src, "d": e.dst})
+
+    def set_meta(self, key: str, value: str) -> None:
+        self.conn.execute(
+            "MERGE (m:Meta {key:$k}) SET m.value = $v", {"k": key, "v": value}
+        )
+
+    def get_meta(self, key: str) -> str | None:
+        try:
+            res = self.conn.execute("MATCH (m:Meta {key:$k}) RETURN m.value", {"k": key})
+        except RuntimeError:
+            return None  # older DB without the Meta table
+        return res.get_next()[0] if res.has_next() else None
 
     def set_embedding(self, node_id: str, vector: list[float]) -> None:
         self.conn.execute(

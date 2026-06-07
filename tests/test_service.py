@@ -1,0 +1,63 @@
+from pathlib import Path
+
+import pytest
+
+from cartograph.pipeline import index_path
+from cartograph.service import CartographService, embedder_from_store
+from cartograph.store import Store
+
+FIX = Path(__file__).parent / "fixtures" / "sample.py"
+
+
+@pytest.fixture
+def db(tmp_path):
+    store = index_path(FIX, tmp_path / "g.kuzu", dim=128, overwrite=True)
+    store.close()
+    return tmp_path / "g.kuzu"
+
+
+def test_index_records_embedder_meta(db):
+    store = Store(db)
+    assert store.get_meta("embedder_backend") == "hash"
+    assert store.get_meta("embedding_dim") == "128"
+    store.close()
+
+
+def test_embedder_from_store_matches_dim(db):
+    store = Store(db)
+    emb = embedder_from_store(store)
+    assert emb is not None and len(emb.embed("hello")) == 128
+    store.close()
+
+
+def test_query_returns_nodes(db):
+    svc = CartographService(db)
+    hits = svc.query("dog bark sound", mode="hybrid", k=5)
+    assert hits and all({"id", "qualified_name", "kind", "score"} <= set(h) for h in hits)
+    assert any("bark" in h["id"] for h in hits)
+    svc.close()
+
+
+def test_semantic_search_and_get_node(db):
+    svc = CartographService(db)
+    hits = svc.semantic_search("greet someone by name", k=5)
+    assert any("greet" in h["id"] for h in hits)
+    node = svc.get_node(hits[0]["id"])
+    assert node and node["id"] == hits[0]["id"]
+    svc.close()
+
+
+def test_neighbors_and_modes(db):
+    svc = CartographService(db)
+    dog = next(h["id"] for h in svc.query("Dog", mode="lexical", k=5) if h["name"] == "Dog")
+    nbrs = svc.neighbors(dog, hops=2)
+    assert any("bark" in n["id"] for n in nbrs)
+    assert {"vector", "graph", "lexical", "hybrid"} <= svc.modes
+    with pytest.raises(ValueError):
+        svc.query("x", mode="bogus")
+    svc.close()
+
+
+def test_missing_db_raises(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        CartographService(tmp_path / "nope.kuzu")

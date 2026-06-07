@@ -84,10 +84,11 @@ class OllamaEmbedder:
         return [self.embed(t) for t in texts]
 
 
-def get_embedder(backend: str | None = None, dim: int = DEFAULT_DIM):
+def get_embedder(backend: str | None = None, dim: int = DEFAULT_DIM, model: str | None = None):
     backend = backend or os.environ.get("CARTOGRAPH_EMBEDDER", "hash")
     if backend == "hash":
         return HashEmbedder(dim=dim)
     if backend == "ollama":
-        return OllamaEmbedder(dim=dim)
+        return OllamaEmbedder(model=model, dim=dim)
     raise ValueError(f"unknown embedder backend: {backend!r}")
+
