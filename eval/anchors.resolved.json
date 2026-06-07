@@ -1,0 +1,249 @@
+{
+  "1": {
+    "mode": "STRUCT",
+    "anchors": {
+      "Client._send_handling_auth": [
+        "httpx/_client.py::httpx._client.Client._send_handling_auth#942"
+      ],
+      "Client._send_handling_redirects": [
+        "httpx/_client.py::httpx._client.Client._send_handling_redirects#976"
+      ],
+      "Client._send_single_request": [
+        "httpx/_client.py::httpx._client.Client._send_single_request#1013"
+      ],
+      "BaseTransport.handle_request": [
+        "httpx/_transports/base.py::httpx._transports.base.BaseTransport.handle_request#26"
+      ]
+    }
+  },
+  "2": {
+    "mode": "STRUCT",
+    "anchors": {
+      "HTTPTransport": [
+        "httpx/_transports/default.py::httpx._transports.default.HTTPTransport#124"
+      ],
+      "MockTransport": [
+        "httpx/_transports/mock.py::httpx._transports.mock.MockTransport#15"
+      ],
+      "WSGITransport": [
+        "httpx/_transports/wsgi.py::httpx._transports.wsgi.WSGITransport#44"
+      ],
+      "AsyncHTTPTransport": [
+        "httpx/_transports/default.py::httpx._transports.default.AsyncHTTPTransport#265"
+      ],
+      "ASGITransport": [
+        "httpx/_transports/asgi.py::httpx._transports.asgi.ASGITransport#50"
+      ]
+    }
+  },
+  "3": {
+    "mode": "STRUCT",
+    "anchors": {
+      "BasicAuth": [
+        "httpx/_auth.py::httpx._auth.BasicAuth#126"
+      ],
+      "DigestAuth": [
+        "httpx/_auth.py::httpx._auth.DigestAuth#175"
+      ],
+      "NetRCAuth": [
+        "httpx/_auth.py::httpx._auth.NetRCAuth#145"
+      ],
+      "FunctionAuth": [
+        "httpx/_auth.py::httpx._auth.FunctionAuth#113"
+      ]
+    }
+  },
+  "4": {
+    "mode": "STRUCT",
+    "anchors": {
+      "_transports.default": [
+        "httpx/_transports/default.py::httpx._transports.default"
+      ]
+    }
+  },
+  "5": {
+    "mode": "STRUCT",
+    "anchors": {
+      "Request.__init__": [
+        "httpx/_models.py::httpx._models.Request.__init__#311"
+      ]
+    }
+  },
+  "6": {
+    "mode": "MULTIHOP",
+    "anchors": {
+      "Client.send": [
+        "httpx/_client.py::httpx._client.Client.send#891"
+      ],
+      "Client._send_single_request": [
+        "httpx/_client.py::httpx._client.Client._send_single_request#1013"
+      ],
+      "BaseTransport.handle_request": [
+        "httpx/_transports/base.py::httpx._transports.base.BaseTransport.handle_request#26"
+      ]
+    }
+  },
+  "7": {
+    "mode": "MULTIHOP",
+    "anchors": {
+      "AsyncClient.send": [
+        "httpx/_client.py::httpx._client.AsyncClient.send#1639"
+      ],
+      "AsyncClient._send_single_request": [
+        "httpx/_client.py::httpx._client.AsyncClient._send_single_request#1762"
+      ],
+      "AsyncBaseTransport.handle_async_request": [
+        "httpx/_transports/base.py::httpx._transports.base.AsyncBaseTransport.handle_async_request#77"
+      ]
+    }
+  },
+  "8": {
+    "mode": "MULTIHOP+SEMANTIC",
+    "anchors": {
+      "DigestAuth.auth_flow": [
+        "httpx/_auth.py::httpx._auth.DigestAuth.auth_flow#193"
+      ],
+      "DigestAuth": [
+        "httpx/_auth.py::httpx._auth.DigestAuth#175"
+      ]
+    }
+  },
+  "9": {
+    "mode": "MULTIHOP+SEMANTIC",
+    "anchors": {
+      "Timeout": [
+        "httpx/_config.py::httpx._config.Timeout#196"
+      ],
+      "Client._send_single_request": [
+        "httpx/_client.py::httpx._client.Client._send_single_request#1013"
+      ]
+    }
+  },
+  "10": {
+    "mode": "SEMANTIC",
+    "anchors": {
+      "HTTPTransport": [
+        "httpx/_transports/default.py::httpx._transports.default.HTTPTransport#124"
+      ],
+      "AsyncHTTPTransport": [
+        "httpx/_transports/default.py::httpx._transports.default.AsyncHTTPTransport#265"
+      ]
+    }
+  },
+  "11": {
+    "mode": "SEMANTIC",
+    "anchors": {
+      "GZipDecoder": [
+        "httpx/_decoders.py::httpx._decoders.GZipDecoder#67"
+      ],
+      "BrotliDecoder": [
+        "httpx/_decoders.py::httpx._decoders.BrotliDecoder#90"
+      ],
+      "ContentDecoder": [
+        "httpx/_decoders.py::httpx._decoders.ContentDecoder#18"
+      ]
+    }
+  },
+  "12": {
+    "mode": "SEMANTIC",
+    "anchors": {
+      "Cookies": [
+        "httpx/_models.py::httpx._models.Cookies#1013"
+      ]
+    }
+  },
+  "13": {
+    "mode": "SEMANTIC",
+    "anchors": {
+      "encode_request": [
+        "httpx/_content.py::httpx._content.encode_request#184"
+      ],
+      "httpx._multipart": [
+        "httpx/_multipart.py::httpx._multipart"
+      ]
+    }
+  },
+  "14": {
+    "mode": "SEMANTIC+EXACT",
+    "anchors": {
+      "create_ssl_context": [
+        "httpx/_config.py::httpx._config.create_ssl_context#49"
+      ]
+    }
+  },
+  "15": {
+    "mode": "CROSS",
+    "anchors": {
+      "Client._send_handling_auth": [
+        "httpx/_client.py::httpx._client.Client._send_handling_auth#942"
+      ],
+      "Client._send_handling_redirects": [
+        "httpx/_client.py::httpx._client.Client._send_handling_redirects#976"
+      ]
+    }
+  },
+  "16": {
+    "mode": "CROSS",
+    "anchors": {
+      "Auth.sync_auth_flow": [
+        "httpx/_auth.py::httpx._auth.Auth.sync_auth_flow#62"
+      ],
+      "DigestAuth.auth_flow": [
+        "httpx/_auth.py::httpx._auth.DigestAuth.auth_flow#193"
+      ]
+    }
+  },
+  "17": {
+    "mode": "CROSS",
+    "anchors": {
+      "BaseClient.event_hooks": [
+        "httpx/_client.py::httpx._client.BaseClient.event_hooks#242",
+        "httpx/_client.py::httpx._client.BaseClient.event_hooks#246"
+      ],
+      "Client._send_single_request": [
+        "httpx/_client.py::httpx._client.Client._send_single_request#1013"
+      ]
+    }
+  },
+  "18": {
+    "mode": "EXACT",
+    "anchors": {
+      "ClientState": [
+        "httpx/_client.py::httpx._client.ClientState#99"
+      ]
+    }
+  },
+  "19": {
+    "mode": "EXACT",
+    "anchors": {
+      "URL": [
+        "httpx/_urls.py::httpx._urls.URL#15"
+      ],
+      "QueryParams": [
+        "httpx/_urls.py::httpx._urls.QueryParams#420"
+      ]
+    }
+  },
+  "20": {
+    "mode": "WHY",
+    "anchors": {
+      "BaseTransport.handle_request": [
+        "httpx/_transports/base.py::httpx._transports.base.BaseTransport.handle_request#26"
+      ],
+      "AsyncBaseTransport.handle_async_request": [
+        "httpx/_transports/base.py::httpx._transports.base.AsyncBaseTransport.handle_async_request#77"
+      ]
+    }
+  },
+  "21": {
+    "mode": "WHY+EXACT",
+    "anchors": {
+      "Client.__enter__": [
+        "httpx/_client.py::httpx._client.Client.__enter__#1288"
+      ],
+      "ClientState": [
+        "httpx/_client.py::httpx._client.ClientState#99"
+      ]
+    }
+  }
+}
