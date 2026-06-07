@@ -20,22 +20,18 @@
     "mode": "STRUCT",
     "anchors": {
       "HTTPTransport": [
-        "ext::HTTPTransport",
         "httpx/_transports/default.py::httpx._transports.default.HTTPTransport#124"
       ],
       "MockTransport": [
         "httpx/_transports/mock.py::httpx._transports.mock.MockTransport#15"
       ],
       "WSGITransport": [
-        "ext::WSGITransport",
         "httpx/_transports/wsgi.py::httpx._transports.wsgi.WSGITransport#44"
       ],
       "AsyncHTTPTransport": [
-        "ext::AsyncHTTPTransport",
         "httpx/_transports/default.py::httpx._transports.default.AsyncHTTPTransport#265"
       ],
       "ASGITransport": [
-        "ext::ASGITransport",
         "httpx/_transports/asgi.py::httpx._transports.asgi.ASGITransport#50"
       ]
     }
@@ -44,7 +40,6 @@
     "mode": "STRUCT",
     "anchors": {
       "BasicAuth": [
-        "ext::BasicAuth",
         "httpx/_auth.py::httpx._auth.BasicAuth#126"
       ],
       "DigestAuth": [
@@ -54,7 +49,6 @@
         "httpx/_auth.py::httpx._auth.NetRCAuth#145"
       ],
       "FunctionAuth": [
-        "ext::FunctionAuth",
         "httpx/_auth.py::httpx._auth.FunctionAuth#113"
       ]
     }
@@ -118,7 +112,6 @@
     "mode": "MULTIHOP+SEMANTIC",
     "anchors": {
       "Timeout": [
-        "ext::Timeout",
         "httpx/_config.py::httpx._config.Timeout#196"
       ],
       "Client._send_single_request": [
@@ -130,11 +123,9 @@
     "mode": "SEMANTIC",
     "anchors": {
       "HTTPTransport": [
-        "ext::HTTPTransport",
         "httpx/_transports/default.py::httpx._transports.default.HTTPTransport#124"
       ],
       "AsyncHTTPTransport": [
-        "ext::AsyncHTTPTransport",
         "httpx/_transports/default.py::httpx._transports.default.AsyncHTTPTransport#265"
       ]
     }
@@ -149,7 +140,6 @@
         "httpx/_decoders.py::httpx._decoders.BrotliDecoder#90"
       ],
       "ContentDecoder": [
-        "ext::ContentDecoder",
         "httpx/_decoders.py::httpx._decoders.ContentDecoder#18"
       ]
     }
@@ -158,7 +148,6 @@
     "mode": "SEMANTIC",
     "anchors": {
       "Cookies": [
-        "ext::Cookies",
         "httpx/_models.py::httpx._models.Cookies#1013"
       ]
     }
@@ -167,7 +156,6 @@
     "mode": "SEMANTIC",
     "anchors": {
       "encode_request": [
-        "ext::encode_request",
         "httpx/_content.py::httpx._content.encode_request#184"
       ],
       "httpx._multipart": [
@@ -179,7 +167,6 @@
     "mode": "SEMANTIC+EXACT",
     "anchors": {
       "create_ssl_context": [
-        "ext::create_ssl_context",
         "httpx/_config.py::httpx._config.create_ssl_context#49"
       ]
     }
@@ -230,11 +217,9 @@
     "mode": "EXACT",
     "anchors": {
       "URL": [
-        "ext::URL",
         "httpx/_urls.py::httpx._urls.URL#15"
       ],
       "QueryParams": [
-        "ext::QueryParams",
         "httpx/_urls.py::httpx._urls.QueryParams#420"
       ]
     }

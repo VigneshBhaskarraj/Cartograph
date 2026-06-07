@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 # Node kinds. A single node table distinguished by `kind` (see PLAN.md schema).
-KINDS = ("module", "class", "function", "method", "rationale")
+KINDS = ("module", "class", "function", "method", "rationale", "external")
 
 # Edge types map 1:1 onto Kuzu REL tables.
 EDGE_TYPES = ("CALLS", "INHERITS", "IMPORTS", "CONTAINS", "DOCUMENTS")

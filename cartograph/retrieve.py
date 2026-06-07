@@ -35,12 +35,20 @@ class Retriever:
 
     def __init__(self, store: Store, embedder=None):
         self.store = store
-        self.ids, self.vecs = store.all_embeddings()
+        # External-import stub nodes carry no content; they must never be answers
+        # (counting them would inflate recall). Keep them out of every candidate set.
+        self.docs = [d for d in store.all_nodes_text() if d["kind"] != "external"]
+        self.valid = {d["id"] for d in self.docs}
+        ids, vecs = store.all_embeddings()
+        self.ids, self.vecs = [], []
+        for i, v in zip(ids, vecs):
+            if i in self.valid:
+                self.ids.append(i)
+                self.vecs.append(v)
         if embedder is None:
             dim = next((len(v) for v in self.vecs if v), None)
             embedder = get_embedder(dim=dim) if dim else get_embedder()
         self.embedder = embedder
-        self.docs = store.all_nodes_text()  # id, kind, name, qualified_name, embed_text, docstring
         self._build_lexical()
 
     # -- lexical (BM25) -------------------------------------------------------
@@ -100,7 +108,7 @@ class Retriever:
                 nxt: set[str] = set()
                 for nid in frontier:
                     for nb in self.store.neighbors(nid, hops=1):
-                        if nb not in visited:
+                        if nb not in visited and nb in self.valid:
                             scores[nb] += seed_score * (decay ** h)
                             nxt.add(nb)
                             visited.add(nb)

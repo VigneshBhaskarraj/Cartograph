@@ -245,21 +245,26 @@ class _FileExtractor:
                 self.imports.append((mod_id, top))
 
     def _handle_import_from(self, node: TSNode) -> None:
+        # IMPORTS edges connect a module to imported *modules*, not to symbols —
+        # recording symbol names mints noisy external stubs and mis-resolves them.
         mod_id = f"{self.rel_path}::{self.module}"
         mod_name_node = node.child_by_field_name("module_name")
+        top = ""
         if mod_name_node is not None:
             top = _text(self.src, mod_name_node).lstrip(".").split(".")[0]
-            if top:
-                self.imports.append((mod_id, top))
-        # Also record imported symbol names (helps resolve internal symbols).
-        for child in node.named_children:
-            if child is mod_name_node:
-                continue
-            target = child
-            if child.type == "aliased_import":
-                target = child.child_by_field_name("name") or child
-            if target.type == "dotted_name":
-                self.imports.append((mod_id, _text(self.src, target).split(".")[-1]))
+        if top:
+            # `from pkg.mod import ...` / `from .mod import ...` -> import the module.
+            self.imports.append((mod_id, top))
+        else:
+            # `from . import sub` -> the imported names are submodules; record those.
+            for child in node.named_children:
+                if child is mod_name_node:
+                    continue
+                target = child
+                if child.type == "aliased_import":
+                    target = child.child_by_field_name("name") or child
+                if target.type in ("dotted_name", "identifier"):
+                    self.imports.append((mod_id, _text(self.src, target).split(".")[0]))
 
 
 def extract_source(source: str, rel_path: str, module: str | None = None) -> _FileExtractor:
@@ -336,7 +341,7 @@ def extract_paths(paths: list[Path], root: Path) -> Graph:
                 if ext is None:
                     ext = Node(
                         id=f"ext::{target}",
-                        kind="module",
+                        kind="external",
                         name=target,
                         qualified_name=target,
                         module=target,

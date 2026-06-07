@@ -45,6 +45,16 @@ def test_hybrid_returns_ranked(tmp_path):
     store.close()
 
 
+def test_retriever_returns_ranked_ids(tmp_path):
+    """M1-6: every mode returns a ranked list of (node_id, score)."""
+    store = _store(tmp_path)
+    r = Retriever(store)
+    for mode in ("vector", "graph", "lexical", "hybrid"):
+        hits = r.retrieve("bark sound", mode=mode, k=5)
+        assert all(isinstance(i, str) and isinstance(s, float) for i, s in hits)
+    store.close()
+
+
 def test_rrf_fuse_basic():
     a = ["x", "y", "z"]
     b = ["y", "x", "w"]

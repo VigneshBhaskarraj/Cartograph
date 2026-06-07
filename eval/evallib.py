@@ -28,7 +28,7 @@ def gold_ids(anchors: list[str], nodes: list[dict]) -> set[str]:
     out: set[str] = set()
     for a in anchors:
         for n in nodes:
-            if anchor_matches(a, n):
+            if n["kind"] != "external" and anchor_matches(a, n):
                 out.add(n["id"])
     return out
 

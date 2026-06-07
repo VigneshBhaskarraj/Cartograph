@@ -219,3 +219,23 @@ against this.
 **Assumptions I'm making unless you object:** SCIP / stack-graphs is **deferred to
 M3** (M0/M1 ship tree-sitter heuristic `INFERRED` call edges, recorded as the
 precision gap); the **reranker is deferred to M2** and not part of this plan.
+
+---
+
+## Implementation notes — deviations from this plan (M0/M1 as shipped)
+Recorded so the drift from the approved plan is explicit (not silent):
+1. **Node `id` format** is `<file>::<qualified_name>#<line>`, not `<file>::<qualified_name>`.
+   The `#<line>` suffix keeps property getter/setter pairs (same qualified name) unique.
+2. **Extra `module STRING` column** on `CodeNode` (used for same-module call-edge
+   resolution). Not in the original Cypher; otherwise the schema matches.
+3. **Vector search is brute-force NumPy cosine, not Kuzu HNSW.** Deliberate: HNSW needs
+   a downloadable Kuzu extension (a network dependency that breaks "offline by default").
+   Brute force is exact, offline, and identical in *recall*; HNSW is a later speed-only
+   optimization. SPEC still names HNSW as the target architecture.
+4. **`external` node kind** for third-party/stdlib import targets — excluded from all
+   retrieval candidate sets and eval gold sets so contentless stubs can't earn recall.
+5. **Metrics live in `eval/evallib.py`** (shared by runner and tests) rather than a
+   separate `eval/score.py`; functionally equivalent.
+6. **WHY mode** is carried by docstrings embedded on their owning code node plus
+   marker-comment (`# WHY:`/`# NOTE:`) rationale nodes; standalone docstring→rationale
+   nodes are a possible later refinement.
