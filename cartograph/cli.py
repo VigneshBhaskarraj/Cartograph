@@ -41,7 +41,12 @@ def query(
 ) -> None:
     """Query the graph. Default mode runs the hybrid (RRF) fusion."""
     store = Store(db)
-    retriever = Retriever(store, embedder=get_embedder(embedder))
+    # Auto-detect the embedder recorded at index time unless overridden, so the query
+    # embeds with the same model the graph was built with (no hash-vs-ollama mismatch).
+    from .service import embedder_from_store
+
+    emb = get_embedder(embedder) if embedder else embedder_from_store(store)
+    retriever = Retriever(store, embedder=emb)
     hits = retriever.retrieve(text, mode=mode, k=k)
     if not hits:
         typer.echo("(no results)")

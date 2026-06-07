@@ -36,6 +36,9 @@ cartograph-out/
 # --- Local scratch / models ---
 .cartograph/
 
+# --- MCP local config (machine-specific absolute paths) ---
+.mcp.json
+
 # --- Editor / OS ---
 .DS_Store
 .idea/

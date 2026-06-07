@@ -58,6 +58,32 @@ def test_neighbors_and_modes(db):
     svc.close()
 
 
+def test_calls_and_callers_directed(db):
+    """calls/callers expose direction so the agent never guesses (Dog.speak -> bark)."""
+    svc = CartographService(db)
+    speak = next(h["id"] for h in svc.query("speak", mode="lexical", k=10)
+                 if h["qualified_name"].endswith("Dog.speak"))
+    bark = next(h["id"] for h in svc.query("bark", mode="lexical", k=10)
+                if h["name"] == "bark")
+    callees = svc.calls(speak)
+    assert any(c["id"] == bark for c in callees)
+    assert all(c["relation"] == "CALLS" and c["direction"] == "out" for c in callees)
+    callers = svc.callers(bark)
+    assert any(c["id"] == speak for c in callers)
+    assert all(c["direction"] == "in" for c in callers)
+    svc.close()
+
+
+def test_neighbors_labeled_and_filtered(db):
+    svc = CartographService(db)
+    dog = next(h["id"] for h in svc.query("Dog", mode="lexical", k=10)
+               if h["name"] == "Dog" and h["kind"] == "class")
+    inh = svc.neighbors(dog, direction="out", relation="INHERITS")
+    assert inh and all(n["relation"] == "INHERITS" and n["direction"] == "out" for n in inh)
+    assert any(n["name"] == "Animal" for n in inh)
+    svc.close()
+
+
 def test_missing_db_raises(tmp_path):
     with pytest.raises(FileNotFoundError):
         CartographService(tmp_path / "nope.kuzu")

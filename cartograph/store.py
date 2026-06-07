@@ -173,6 +173,28 @@ class Store:
                 out.append((r[0], r[1]))
         return out
 
+    def relations(self, node_id: str, direction: str = "both", types: list[str] | None = None) -> list[dict]:
+        """1-hop edges of a node, each labeled with relation type and direction
+        ('out' = node is the source, 'in' = node is the target)."""
+        types = types or list(EDGE_TYPES)
+        out: list[dict] = []
+        for et in types:
+            if et not in EDGE_TYPES:
+                continue
+            if direction in ("out", "both"):
+                res = self.conn.execute(
+                    f"MATCH (a:CodeNode {{id:$id}})-[:{et}]->(b:CodeNode) RETURN DISTINCT b.id", {"id": node_id}
+                )
+                while res.has_next():
+                    out.append({"relation": et, "direction": "out", "id": res.get_next()[0]})
+            if direction in ("in", "both"):
+                res = self.conn.execute(
+                    f"MATCH (a:CodeNode)-[:{et}]->(b:CodeNode {{id:$id}}) RETURN DISTINCT a.id", {"id": node_id}
+                )
+                while res.has_next():
+                    out.append({"relation": et, "direction": "in", "id": res.get_next()[0]})
+        return out
+
     def neighbors(self, node_id: str, hops: int = 1) -> list[str]:
         res = self.conn.execute(
             f"MATCH (a:CodeNode {{id:$id}})-[*1..{hops}]-(b:CodeNode) RETURN DISTINCT b.id",

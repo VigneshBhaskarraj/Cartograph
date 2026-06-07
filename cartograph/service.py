@@ -79,9 +79,29 @@ class CartographService:
         """Full detail for one node by id."""
         return self._node(node_id)
 
-    def neighbors(self, node_id: str, hops: int = 1) -> list[dict]:
-        """Nodes within `hops` edges (calls/inheritance/imports/containment)."""
+    def neighbors(self, node_id: str, direction: str = "both", relation: str | None = None,
+                  hops: int = 1) -> list[dict]:
+        """Adjacent nodes. At hops=1 each result is labeled with `relation`
+        (CALLS/INHERITS/IMPORTS/CONTAINS/DOCUMENTS) and `direction` (out=this node is
+        the source, in=this node is the target). `direction` and `relation` filter the
+        edges. hops>1 expands undirected/unlabeled for broad context."""
+        if hops <= 1:
+            types = [relation.upper()] if relation else None
+            out = []
+            for rel in self.store.relations(node_id, direction=direction, types=types):
+                node = self._node(rel["id"])
+                if node:
+                    out.append({**node, "relation": rel["relation"], "direction": rel["direction"]})
+            return out
         return [n for n in (self._node(i) for i in self.store.neighbors(node_id, hops=hops)) if n]
+
+    def calls(self, node_id: str) -> list[dict]:
+        """What this node calls (outgoing CALLS edges)."""
+        return self.neighbors(node_id, direction="out", relation="CALLS")
+
+    def callers(self, node_id: str) -> list[dict]:
+        """What calls this node (incoming CALLS edges)."""
+        return self.neighbors(node_id, direction="in", relation="CALLS")
 
     def shortest_path(self, src: str, dst: str) -> list[dict]:
         """Ordered nodes on a shortest path between two node ids ([] if none)."""

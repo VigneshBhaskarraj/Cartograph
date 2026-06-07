@@ -44,10 +44,22 @@ def build_server(service: CartographService):
         return service.get_node(id)
 
     @mcp.tool()
-    def neighbors(id: str, hops: int = 1) -> list[dict]:
-        """Nodes within `hops` edges of a node — callers/callees, base/subclasses,
-        imports, and containment. Use to expand context around a symbol."""
-        return service.neighbors(id, hops=hops)
+    def neighbors(id: str, direction: str = "both", relation: str = "", hops: int = 1) -> list[dict]:
+        """Adjacent nodes, each labeled with `relation` (CALLS/INHERITS/IMPORTS/
+        CONTAINS/DOCUMENTS) and `direction` (out=this node is the source, in=target).
+        Filter with `direction` (out|in|both) and `relation` (e.g. CALLS). Don't guess
+        direction — it's in the result. hops>1 expands unlabeled for broad context."""
+        return service.neighbors(id, direction=direction, relation=(relation or None), hops=hops)
+
+    @mcp.tool()
+    def calls(id: str) -> list[dict]:
+        """What this node calls — outgoing CALLS edges only. Use for 'what does X call'."""
+        return service.calls(id)
+
+    @mcp.tool()
+    def callers(id: str) -> list[dict]:
+        """What calls this node — incoming CALLS edges only. Use for 'what calls X'."""
+        return service.callers(id)
 
     @mcp.tool()
     def shortest_path(src: str, dst: str) -> list[dict]:

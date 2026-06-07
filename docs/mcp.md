@@ -7,14 +7,19 @@ no data egress.
 ## Tools
 | Tool | What it answers |
 | --- | --- |
-| `query(text, mode="hybrid", k=10)` | Ranked nodes for a question. `mode`: `hybrid` (default) \| `vector` \| `graph` \| `lexical`. |
+| `query(text, mode="hybrid", k=10)` | Ranked nodes for a question. `mode`: `hybrid` (default) \| `vector` \| `graph` \| `lexical` \| `rerank`. |
 | `semantic_search(text, k=10)` | Pure vector search — concepts whose wording isn't in the code. |
 | `get_node(id)` | Full detail for one node id. |
-| `neighbors(id, hops=1)` | Callers/callees, base/subclasses, imports, containment around a node. |
+| `calls(id)` | **What this node calls** (outgoing CALLS edges only). |
+| `callers(id)` | **What calls this node** (incoming CALLS edges only). |
+| `neighbors(id, direction="both", relation="", hops=1)` | Adjacent nodes, each labeled with `relation` and `direction`. Filter by `direction` (out\|in\|both) and `relation` (e.g. CALLS, INHERITS). |
 | `shortest_path(src, dst)` | Ordered nodes on a shortest path between two node ids. |
 
 Each node result carries `id`, `kind`, `name`, `qualified_name`, `file_path`,
-`start_line`, `signature`, `docstring`, and (for ranked results) `score`.
+`start_line`, `signature`, `docstring`, and — where applicable — `score` (ranked
+results) or `relation`/`direction` (neighbor results). **Direction and edge type come
+from the graph**, so an agent answers "what does X call" with `calls(id)` instead of
+guessing from an undirected blob.
 
 ## Setup
 ```bash
