@@ -9,7 +9,8 @@ no data egress.
 | --- | --- |
 | `query(text, mode="hybrid", k=10)` | Ranked nodes for a question. `mode`: `hybrid` (default) \| `vector` \| `graph` \| `lexical` \| `rerank`. |
 | `semantic_search(text, k=10)` | Pure vector search — concepts whose wording isn't in the code. |
-| `get_node(id)` | Full detail for one node id. |
+| `get_node(id)` | Full detail for one node — **id or qualified name**. |
+| `resolve(ref)` | Node(s) matching a reference — disambiguate a bare name. |
 | `calls(id)` | **What this node calls** (outgoing CALLS edges only). |
 | `callers(id)` | **What calls this node** (incoming CALLS edges only). |
 | `neighbors(id, direction="both", relation="", hops=1)` | Adjacent nodes, each labeled with `relation` and `direction`. Filter by `direction` (out\|in\|both) and `relation` (e.g. CALLS, INHERITS). |
@@ -20,6 +21,11 @@ Each node result carries `id`, `kind`, `name`, `qualified_name`, `file_path`,
 results) or `relation`/`direction` (neighbor results). **Direction and edge type come
 from the graph**, so an agent answers "what does X call" with `calls(id)` instead of
 guessing from an undirected blob.
+
+**Node references:** every id-taking tool accepts either the internal node id
+(`httpx/_client.py::httpx._client.Client.send#891`) **or** a qualified name
+(`httpx._client.Client.send`) / bare name (`send`). Ambiguous names resolve to the most
+direct match; use `resolve(ref)` to list all candidates and pick a precise id.
 
 ## Setup
 ```bash

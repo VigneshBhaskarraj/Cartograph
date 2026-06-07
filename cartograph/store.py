@@ -173,6 +173,36 @@ class Store:
                 out.append((r[0], r[1]))
         return out
 
+    def resolve_ids(self, ref: str) -> list[str]:
+        """Resolve a node reference to id(s), most-direct first. Accepts a full node id,
+        a qualified name (`httpx._client.Client.send`), a dotted suffix (`Client.send`),
+        or a bare name (`send`). Excludes external stubs. Tiers don't mix: the first
+        tier that matches wins."""
+        def _ids(query: str, params: dict) -> list[str]:
+            res = self.conn.execute(query, params)
+            rows = []
+            while res.has_next():
+                rows.append(tuple(res.get_next()))
+            rows.sort(key=lambda r: (len(r[1]) if len(r) > 1 else 0, r[0]))
+            return [r[0] for r in rows]
+
+        exact = _ids("MATCH (c:CodeNode) WHERE c.id = $r RETURN c.id", {"r": ref})
+        if exact:
+            return exact
+        qn = _ids(
+            "MATCH (c:CodeNode) WHERE c.qualified_name = $r AND c.kind <> 'external' "
+            "RETURN c.id, c.qualified_name", {"r": ref})
+        if qn:
+            return qn
+        suffix = _ids(
+            "MATCH (c:CodeNode) WHERE c.qualified_name ENDS WITH $s AND c.kind <> 'external' "
+            "RETURN c.id, c.qualified_name", {"s": "." + ref})
+        if suffix:
+            return suffix
+        return _ids(
+            "MATCH (c:CodeNode) WHERE c.name = $r AND c.kind <> 'external' "
+            "RETURN c.id, c.qualified_name", {"r": ref})
+
     def relations(self, node_id: str, direction: str = "both", types: list[str] | None = None) -> list[dict]:
         """1-hop edges of a node, each labeled with relation type and direction
         ('out' = node is the source, 'in' = node is the target)."""

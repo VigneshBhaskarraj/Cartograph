@@ -84,6 +84,27 @@ def test_neighbors_labeled_and_filtered(db):
     svc.close()
 
 
+def test_tools_accept_qualified_name(db):
+    """The friction from dogfooding: tools resolve a qualified name, not just the id."""
+    svc = CartographService(db)
+    # get_node by qualified name (no internal #line id needed)
+    node = svc.get_node("m.Dog.speak") or svc.get_node("Dog.speak")
+    assert node and node["qualified_name"].endswith("Dog.speak")
+    # calls by qualified name resolves and returns the callee
+    callees = svc.calls("Dog.speak")
+    assert any(c["name"] == "bark" for c in callees)
+    # resolve surfaces candidates for a bare name
+    assert any(r["name"] == "bark" for r in svc.resolve("bark"))
+    svc.close()
+
+
+def test_unknown_ref_is_empty(db):
+    svc = CartographService(db)
+    assert svc.get_node("does.not.exist") is None
+    assert svc.calls("does.not.exist") == []
+    svc.close()
+
+
 def test_missing_db_raises(tmp_path):
     with pytest.raises(FileNotFoundError):
         CartographService(tmp_path / "nope.kuzu")
