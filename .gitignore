@@ -1,0 +1,39 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# --- uv / virtualenv ---
+.venv/
+.uv/
+
+# --- Environment / secrets ---
+.env
+.env.*
+!.env.example
+
+# --- Tests / coverage ---
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# --- Kuzu graph store ---
+# The graph is regenerable from source. Default to ignoring it; revisit if you
+# decide to commit a prebuilt graph as a team "map" (see SPEC.md open questions).
+*.kuzu/
+*.kz/
+cartograph-out/cache/
+cartograph-out/cost.json
+
+# --- Local scratch / models ---
+.cartograph/
+
+# --- Editor / OS ---
+.DS_Store
+.idea/
+.vscode/
+*.swp
