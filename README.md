@@ -29,13 +29,14 @@ embeddings (still zero egress; only talks to `127.0.0.1`).
 ## Status / roadmap
 - [x] M0 — vertical slice (extract → store → embed → query, one Python file → httpx)
 - [x] M1 — evaluation harness (21 questions over `httpx`, recall@k / precision@k / MRR, per-mode)
-- [~] M2 — hybrid retrieval + reranker (RRF fusion landed and leads on recall; reranker pending)
+- [~] M2 — hybrid retrieval + reranker (RRF fusion + personalized-PageRank graph landed; reranker pending)
 - [ ] M3 — real symbol resolution (SCIP / stack-graphs)
 - [ ] M4 — MCP server, incremental updates, SQL-schema-in-graph
 
 **Latest eval** (httpx==0.27.2, offline embedder): `hybrid+rrf` leads on recall@5 (0.67)
-and recall@10 (0.76), beating both vector-only and graph-only; MRR (0.38) is on par with
-graph — closing that gap is what the M2 reranker is for. Honest table and interpretation:
+and MRR (0.36) over both single-signal baselines and ties them on recall@10 (0.76). The
+graph leg now uses personalized PageRank — graph-only MULTIHOP recall hit 1.0. The
+remaining ordering gap is what the M2 reranker targets. Honest table and interpretation:
 [`eval/README.md`](./eval/README.md).
 
 ## License

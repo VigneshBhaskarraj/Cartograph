@@ -28,6 +28,15 @@ def test_two_hop(tmp_path):
     store.close()
 
 
+def test_graph_ppr_reaches_multihop(tmp_path):
+    """PPR seeded on Dog reaches bark (Dog -CONTAINS-> speak -CALLS-> bark)."""
+    store = _store(tmp_path)
+    r = Retriever(store)
+    hits = [i for i, _ in r.graph("Dog", k=6)]
+    assert any("bark" in h for h in hits)
+    store.close()
+
+
 def test_lexical_exact(tmp_path):
     """Exact symbol name is found by lexical search."""
     store = _store(tmp_path)
