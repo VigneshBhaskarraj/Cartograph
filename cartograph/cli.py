@@ -22,10 +22,11 @@ def index(
     db: str = typer.Option(DEFAULT_DB, help="Kuzu DB path."),
     embedder: str = typer.Option(None, help="Embedder backend: hash | ollama."),
     no_cache: bool = typer.Option(False, "--no-cache", help="Ignore the embedding cache; re-embed all."),
+    resolver: str = typer.Option("heuristic", help="Call resolver: heuristic | jedi (needs --extra resolve)."),
 ) -> None:
     """Parse → embed → store a codebase into the graph (re-embeds only changed symbols)."""
     store = index_path(path, Path(db), dim=DEFAULT_DIM, embedder=get_embedder(embedder),
-                       overwrite=True, use_cache=not no_cache)
+                       overwrite=True, use_cache=not no_cache, resolver=resolver)
     counts = store.counts()
     reused, embedded = getattr(store, "cache_stats", (0, 0))
     store.close()

@@ -22,6 +22,7 @@ cartograph = "cartograph.cli:app"
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
 mcp = ["mcp>=1.2"]
+resolve = ["jedi>=0.19"]
 
 [build-system]
 requires = ["hatchling"]

@@ -69,6 +69,30 @@ def test_self_call_resolves_to_own_class(tmp_path):
     assert (foo_go.id, bar_run.id) not in calls  # no phantom cross-class edge
 
 
+def test_jedi_resolves_receiver_type(tmp_path):
+    """With resolver=jedi, `a.read()` (a: A) binds to A.read — not B.read — using type
+    inference the name heuristic can't do."""
+    import pytest
+
+    pytest.importorskip("jedi")
+    src = (
+        "class A:\n    def read(self):\n        return 1\n\n"
+        "class B:\n    def read(self):\n        return 2\n\n"
+        "def use():\n    a = A()\n    return a.read()\n"
+    )
+    p = tmp_path / "m.py"
+    p.write_text(src)
+    g = extract_paths([p], root=p, resolver="jedi")
+
+    def node(suffix):
+        return next(n for n in g.nodes if n.qualified_name.endswith(suffix))
+
+    use, a_read, b_read = node("m.use"), node("A.read"), node("B.read")
+    calls = {(e.src, e.dst) for e in g.edges if e.type == "CALLS"}
+    assert (use.id, a_read.id) in calls
+    assert (use.id, b_read.id) not in calls
+
+
 def test_rationale_node():
     """The `# WHY:` comment becomes a rationale node with a DOCUMENTS edge."""
     graph = extract_paths([FIX], root=FIX)

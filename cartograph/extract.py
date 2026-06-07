@@ -90,7 +90,7 @@ class _FileExtractor:
         self.nodes: list[Node] = []
         self.edges: list[Edge] = []
         # Pending references resolved across the whole corpus in pass 2.
-        self.calls: list[tuple[str, str, bool]] = []  # (caller_id, callee_name, is_self_call)
+        self.calls: list[tuple[str, str, bool, int, int]] = []  # (caller_id, name, is_self, row, col)
         self.bases: list[tuple[str, str]] = []  # (class_id, base_name)
         self.imports: list[tuple[str, str]] = []  # (module_id, imported_name)
 
@@ -225,8 +225,12 @@ class _FileExtractor:
         if node.type == "call":
             func = node.child_by_field_name("function")
             if func is not None:
-                name = _callee_name(func, self.src)
-                if name:
+                # The identifier actually being called (rightmost name), with its position
+                # so a real symbol resolver (Jedi) can do receiver-type goto.
+                name_node = (func.child_by_field_name("attribute") if func.type == "attribute"
+                             else func if func.type == "identifier" else None)
+                if name_node is not None:
+                    name = _text(self.src, name_node)
                     # A `self.x()` / `cls.x()` receiver lets us resolve to the caller's
                     # own class — disambiguating same-name methods (e.g. sync vs async).
                     is_self = False
@@ -234,7 +238,8 @@ class _FileExtractor:
                         obj = func.child_by_field_name("object")
                         if obj is not None and obj.type == "identifier" and _text(self.src, obj) in ("self", "cls"):
                             is_self = True
-                    self.calls.append((caller_id, name, is_self))
+                    row, col = name_node.start_point
+                    self.calls.append((caller_id, name, is_self, row, col))
         for child in node.children:
             # Don't descend into nested function/class bodies; their calls belong to them.
             if child.type in ("function_definition", "class_definition"):
@@ -283,8 +288,42 @@ def extract_source(source: str, rel_path: str, module: str | None = None) -> _Fi
     return fx
 
 
-def extract_paths(paths: list[Path], root: Path) -> Graph:
-    """Extract one or many files and resolve cross-file references into edges."""
+def _resolve_calls_jedi(extractors, paths, pkg_parent, by_id, qual_index, heuristic_targets, add_call):
+    """Resolve call edges with Jedi (receiver-type inference). Falls back to the
+    heuristic only when Jedi returns nothing; if Jedi resolves a call to something
+    outside the graph (stdlib/3rd-party), no edge is added (precision over noise)."""
+    import jedi
+
+    project = jedi.Project(str(pkg_parent))
+    for fx, path in zip(extractors, paths):
+        try:
+            script = jedi.Script(code=fx.src.decode("utf-8", "replace"), path=str(path), project=project)
+        except Exception:
+            script = None
+        for caller_id, name, is_self, row, col in fx.calls:
+            caller = by_id.get(caller_id)
+            target_ids: list[str] | None = None
+            jedi_decided = False
+            if script is not None:
+                try:
+                    defs = script.goto(row + 1, col, follow_imports=True)
+                except Exception:
+                    defs = []
+                if defs:
+                    jedi_decided = True
+                    target_ids = [qual_index[d.full_name].id for d in defs
+                                  if d.full_name and d.full_name in qual_index]
+            if target_ids is None:  # Jedi gave no opinion -> heuristic fallback
+                target_ids = [c.id for c in heuristic_targets(caller, name, is_self)]
+            for tid in target_ids:
+                add_call(caller_id, tid, "jedi" if jedi_decided else "tree-sitter")
+
+
+def extract_paths(paths: list[Path], root: Path, resolver: str = "heuristic") -> Graph:
+    """Extract one or many files and resolve cross-file references into edges.
+
+    `resolver`: 'heuristic' (name + self-class, no deps) or 'jedi' (receiver-type
+    inference; needs the `resolve` extra)."""
     pkg_parent = root.parent if root.is_dir() else root.parent
     extractors: list[_FileExtractor] = []
     for path in paths:
@@ -305,6 +344,10 @@ def extract_paths(paths: list[Path], root: Path) -> Graph:
 
     edges: list[Edge] = list(_dedupe(e for fx in extractors for e in fx.edges))
     by_id = {n.id: n for n in nodes}
+    qual_index: dict[str, Node] = {}
+    for n in nodes:
+        if n.kind in ("function", "method", "class") and n.qualified_name not in qual_index:
+            qual_index[n.qualified_name] = n
 
     # Resolve calls (INFERRED). Prefer the caller's own class for `self.` calls, then
     # same-module candidates, before falling back to all name matches.
@@ -313,30 +356,40 @@ def extract_paths(paths: list[Path], root: Path) -> Graph:
     def _class_of(node: Node) -> str | None:
         return node.qualified_name.rsplit(".", 1)[0] if node.kind == "method" else None
 
-    for fx in extractors:
-        for caller_id, name, is_self in fx.calls:
-            cands = name_index.get(name)
-            if not cands:
-                continue
-            caller = by_id.get(caller_id)
-            chosen: list[Node] | None = None
-            if is_self and caller is not None and caller.kind == "method":
-                caller_class = _class_of(caller)
-                same_class = [c for c in cands if _class_of(c) == caller_class]
-                if same_class:  # self.x() bound to this class's own method
-                    chosen = same_class
-            if chosen is None:
-                same = [c for c in cands if caller and c.module == caller.module]
-                chosen = same or cands
-            if len(chosen) > 8:  # avoid god-node fan-out on very common names
-                continue
-            for c in chosen:
-                if c.id == caller_id:
-                    continue
-                key = ("CALLS", caller_id, c.id)
-                if key not in seen:
-                    seen.add(key)
-                    edges.append(Edge("CALLS", caller_id, c.id, INFERRED))
+    def _heuristic_targets(caller: Node | None, name: str, is_self: bool) -> list[Node]:
+        cands = name_index.get(name)
+        if not cands:
+            return []
+        chosen: list[Node] | None = None
+        if is_self and caller is not None and caller.kind == "method":
+            caller_class = _class_of(caller)
+            same_class = [c for c in cands if _class_of(c) == caller_class]
+            if same_class:  # self.x() bound to this class's own method
+                chosen = same_class
+        if chosen is None:
+            same = [c for c in cands if caller and c.module == caller.module]
+            chosen = same or cands
+        if len(chosen) > 8:  # avoid god-node fan-out on very common names
+            return []
+        return chosen
+
+    def _add_call(caller_id: str, target_id: str, resolver_tag: str) -> None:
+        if target_id == caller_id:
+            return
+        key = ("CALLS", caller_id, target_id)
+        if key not in seen:
+            seen.add(key)
+            edges.append(Edge("CALLS", caller_id, target_id, INFERRED, resolver_tag))
+
+    if resolver == "jedi":
+        _resolve_calls_jedi(extractors, paths, pkg_parent, by_id, qual_index,
+                            _heuristic_targets, _add_call)
+    else:
+        for fx in extractors:
+            for caller_id, name, is_self, _row, _col in fx.calls:
+                caller = by_id.get(caller_id)
+                for c in _heuristic_targets(caller, name, is_self):
+                    _add_call(caller_id, c.id, "tree-sitter")
 
     # Resolve inheritance (EXTRACTED structure; target may be external -> skip).
     for fx in extractors:
