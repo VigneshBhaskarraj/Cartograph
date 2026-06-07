@@ -24,10 +24,14 @@ htmlcov/
 # --- Kuzu graph store ---
 # The graph is regenerable from source. Default to ignoring it; revisit if you
 # decide to commit a prebuilt graph as a team "map" (see SPEC.md open questions).
+*.kuzu
 *.kuzu/
+*.kuzu.wal
 *.kz/
-cartograph-out/cache/
-cartograph-out/cost.json
+cartograph-out/
+
+# --- Eval corpus (vendored httpx, fetched at a pinned version) ---
+.corpus/
 
 # --- Local scratch / models ---
 .cartograph/
