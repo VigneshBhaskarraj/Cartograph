@@ -64,7 +64,8 @@ class HashEmbedder:
 class OllamaEmbedder:
     """Local Ollama embeddings. Network calls go only to 127.0.0.1."""
 
-    def __init__(self, model: str = "nomic-embed-text", host: str | None = None, dim: int = DEFAULT_DIM):
+    def __init__(self, model: str | None = None, host: str | None = None, dim: int = DEFAULT_DIM):
+        model = model or os.environ.get("CARTOGRAPH_OLLAMA_MODEL", "nomic-embed-text")
         self.name = f"ollama:{model}"
         self.model = model
         self.host = (host or os.environ.get("OLLAMA_HOST") or "http://127.0.0.1:11434").rstrip("/")
