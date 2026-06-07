@@ -42,6 +42,33 @@ def test_call_edge_inferred():
     assert calls and all(e.confidence == "INFERRED" for e in calls)
 
 
+def test_self_call_resolves_to_own_class(tmp_path):
+    """`self._run()` in Foo binds to Foo._run, not Bar._run (sync/async disambiguation)."""
+    src = (
+        "class Foo:\n"
+        "    def go(self):\n"
+        "        return self._run()\n"
+        "    def _run(self):\n"
+        "        return 1\n\n"
+        "class Bar:\n"
+        "    def go(self):\n"
+        "        return self._run()\n"
+        "    def _run(self):\n"
+        "        return 2\n"
+    )
+    p = tmp_path / "m.py"
+    p.write_text(src)
+    g = extract_paths([p], root=p)
+
+    def node(suffix):
+        return next(n for n in g.nodes if n.qualified_name.endswith(suffix))
+
+    foo_go, foo_run, bar_run = node("Foo.go"), node("Foo._run"), node("Bar._run")
+    calls = {(e.src, e.dst) for e in g.edges if e.type == "CALLS"}
+    assert (foo_go.id, foo_run.id) in calls
+    assert (foo_go.id, bar_run.id) not in calls  # no phantom cross-class edge
+
+
 def test_rationale_node():
     """The `# WHY:` comment becomes a rationale node with a DOCUMENTS edge."""
     graph = extract_paths([FIX], root=FIX)

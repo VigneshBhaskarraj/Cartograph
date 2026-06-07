@@ -108,12 +108,34 @@ RRF (so it can't blindly demote retrieved hits).
 reranker moves MRR up decisively with a strong-enough model; the recall@10/EXACT trade is
 documented, not hidden. Next precision lever is M3 (real symbol resolution).
 
+## Call-edge precision (M3 down-payment)
+
+The anchor-recall eval above doesn't measure whether *call edges point at the right
+node* — surfaced by dogfooding the MCP server ("what does `Client.send` call?" returned
+phantom `AsyncClient.*` edges). `eval/call_precision.py` measures it against
+ground-truthed callee sets.
+
+| index | mean call-edge precision | recall |
+| --- | --- | --- |
+| before (name + same-module) | 0.500 | 0.800 |
+| **after (self-call → own class)** | **0.571** | 0.800 |
+
+Resolving `self.`/`cls.` calls to the **caller's own class** kills the phantom sync↔async
+edges (`Client.send` no longer "calls" `AsyncClient._send_handling_auth`), removing 56
+cross-class edges (722 → 666). Run with `uv run python eval/call_precision.py`.
+The retrieval eval is unchanged (hybrid) — this is a *precision* fix the recall metric
+can't see, which is exactly why the precision metric was added.
+
+**Still wrong (needs M3 / SCIP):** non-`self` receiver calls — `response.read()` /
+`response.close()` resolve by bare method name to *every* class defining `read`/`close`
+(`Request.read`, `BoundSyncStream.close`, …). Real receiver-type inference is the M3 job.
+
 ## Honesty notes
-- **Call edges are heuristic (INFERRED).** A call to a common method name with no
-  same-module definition links to *every* class defining that name (e.g. one
-  `_send_single_request` call site → all four `*Transport.handle_request`). This is the
-  acknowledged M3 precision gap (SCIP / stack-graphs); it can hand graph mode some
-  recall via noise. Tagged `INFERRED` in the graph so it's never mistaken for resolved.
+- **Call edges are heuristic (INFERRED).** Non-`self` method calls resolve by bare name,
+  so a `.read()`/`.close()` or a `transport.handle_request()` call links to *every* class
+  defining that name. This is the acknowledged M3 precision gap (SCIP / stack-graphs);
+  tagged `INFERRED` so it's never mistaken for resolved. (`self.`-calls are now
+  class-resolved — see above.)
 - **External imports are excluded from scoring.** Third-party/stdlib import targets are
   stored as contentless `external` nodes and removed from every candidate set and gold
   set, so retrieval can't earn credit for an empty placeholder.

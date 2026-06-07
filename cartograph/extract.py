@@ -90,7 +90,7 @@ class _FileExtractor:
         self.nodes: list[Node] = []
         self.edges: list[Edge] = []
         # Pending references resolved across the whole corpus in pass 2.
-        self.calls: list[tuple[str, str]] = []  # (caller_id, callee_name)
+        self.calls: list[tuple[str, str, bool]] = []  # (caller_id, callee_name, is_self_call)
         self.bases: list[tuple[str, str]] = []  # (class_id, base_name)
         self.imports: list[tuple[str, str]] = []  # (module_id, imported_name)
 
@@ -227,7 +227,14 @@ class _FileExtractor:
             if func is not None:
                 name = _callee_name(func, self.src)
                 if name:
-                    self.calls.append((caller_id, name))
+                    # A `self.x()` / `cls.x()` receiver lets us resolve to the caller's
+                    # own class — disambiguating same-name methods (e.g. sync vs async).
+                    is_self = False
+                    if func.type == "attribute":
+                        obj = func.child_by_field_name("object")
+                        if obj is not None and obj.type == "identifier" and _text(self.src, obj) in ("self", "cls"):
+                            is_self = True
+                    self.calls.append((caller_id, name, is_self))
         for child in node.children:
             # Don't descend into nested function/class bodies; their calls belong to them.
             if child.type in ("function_definition", "class_definition"):
@@ -299,16 +306,28 @@ def extract_paths(paths: list[Path], root: Path) -> Graph:
     edges: list[Edge] = list(_dedupe(e for fx in extractors for e in fx.edges))
     by_id = {n.id: n for n in nodes}
 
-    # Resolve calls (INFERRED). Prefer same-module candidates for precision.
+    # Resolve calls (INFERRED). Prefer the caller's own class for `self.` calls, then
+    # same-module candidates, before falling back to all name matches.
     seen: set[tuple[str, str, str]] = {(e.type, e.src, e.dst) for e in edges}
+
+    def _class_of(node: Node) -> str | None:
+        return node.qualified_name.rsplit(".", 1)[0] if node.kind == "method" else None
+
     for fx in extractors:
-        for caller_id, name in fx.calls:
+        for caller_id, name, is_self in fx.calls:
             cands = name_index.get(name)
             if not cands:
                 continue
             caller = by_id.get(caller_id)
-            same = [c for c in cands if caller and c.module == caller.module]
-            chosen = same or cands
+            chosen: list[Node] | None = None
+            if is_self and caller is not None and caller.kind == "method":
+                caller_class = _class_of(caller)
+                same_class = [c for c in cands if _class_of(c) == caller_class]
+                if same_class:  # self.x() bound to this class's own method
+                    chosen = same_class
+            if chosen is None:
+                same = [c for c in cands if caller and c.module == caller.module]
+                chosen = same or cands
             if len(chosen) > 8:  # avoid god-node fan-out on very common names
                 continue
             for c in chosen:
