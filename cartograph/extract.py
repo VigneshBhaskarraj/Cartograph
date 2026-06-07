@@ -100,14 +100,16 @@ class _FileExtractor:
         sig = _signature(self.src, node, body) if kind in ("class", "function", "method") else ""
         doc = _docstring(body, self.src)
         embed_text = "\n".join(p for p in (f"{kind} {qualified_name}", sig, doc) if p).strip()
+        start_line = node.start_point[0] + 1
         n = Node(
-            id=f"{self.rel_path}::{qualified_name}",
+            # Line-suffixed so property getter/setter pairs (same qualified name) stay unique.
+            id=f"{self.rel_path}::{qualified_name}#{start_line}",
             kind=kind,
             name=name,
             qualified_name=qualified_name,
             module=self.module,
             file_path=self.rel_path,
-            start_line=node.start_point[0] + 1,
+            start_line=start_line,
             end_line=node.end_point[0] + 1,
             signature=sig,
             docstring=doc,

@@ -1,0 +1,87 @@
+# M1 eval set over httpx==0.27.2 (see docs/eval-set-httpx.md).
+# `anchors` are dotted qualified-name suffixes; a question is a hit if ANY anchor
+# node appears in the retriever's top-k. Confirmed against the pinned corpus.
+- id: 1
+  question: "What does Client.send call to actually dispatch a request?"
+  mode: STRUCT
+  anchors: ["Client._send_handling_auth", "Client._send_handling_redirects", "Client._send_single_request", "BaseTransport.handle_request"]
+- id: 2
+  question: "Which classes implement the BaseTransport interface?"
+  mode: STRUCT
+  anchors: ["HTTPTransport", "MockTransport", "WSGITransport", "AsyncHTTPTransport", "ASGITransport"]
+- id: 3
+  question: "What are the subclasses of the base Auth class?"
+  mode: STRUCT
+  anchors: ["BasicAuth", "DigestAuth", "NetRCAuth", "FunctionAuth"]
+- id: 4
+  question: "Which module imports httpcore?"
+  mode: STRUCT
+  anchors: ["_transports.default"]
+- id: 5
+  question: "What calls encode_request?"
+  mode: STRUCT
+  anchors: ["Request.__init__"]
+- id: 6
+  question: "Trace the path from Client.get down to the transport's handle_request."
+  mode: MULTIHOP
+  anchors: ["Client.send", "Client._send_single_request", "BaseTransport.handle_request"]
+- id: 7
+  question: "What's the async equivalent path of Client.send?"
+  mode: MULTIHOP
+  anchors: ["AsyncClient.send", "AsyncClient._send_single_request", "AsyncBaseTransport.handle_async_request"]
+- id: 8
+  question: "How does a DigestAuth challenge get from a 401 response back into a retried request?"
+  mode: MULTIHOP+SEMANTIC
+  anchors: ["DigestAuth.auth_flow", "DigestAuth"]
+- id: 9
+  question: "How is the Timeout config connected to the transport layer?"
+  mode: MULTIHOP+SEMANTIC
+  anchors: ["Timeout", "Client._send_single_request"]
+- id: 10
+  question: "Where is automatic retry / connection-failure handling?"
+  mode: SEMANTIC
+  anchors: ["HTTPTransport", "AsyncHTTPTransport"]
+- id: 11
+  question: "How are gzip and brotli compressed responses decompressed?"
+  mode: SEMANTIC
+  anchors: ["GZipDecoder", "BrotliDecoder", "ContentDecoder"]
+- id: 12
+  question: "Where does cookie persistence across requests happen?"
+  mode: SEMANTIC
+  anchors: ["Cookies"]
+- id: 13
+  question: "How is the request body serialized from JSON, form data, or files?"
+  mode: SEMANTIC
+  anchors: ["encode_request", "httpx._multipart"]
+- id: 14
+  question: "Where is SSL/TLS verification configured?"
+  mode: SEMANTIC+EXACT
+  anchors: ["create_ssl_context"]
+- id: 15
+  question: "What connects authentication to redirect handling?"
+  mode: CROSS
+  anchors: ["Client._send_handling_auth", "Client._send_handling_redirects"]
+- id: 16
+  question: "What links Response to the Auth classes?"
+  mode: CROSS
+  anchors: ["Auth.sync_auth_flow", "DigestAuth.auth_flow"]
+- id: 17
+  question: "How do event_hooks touch both requests and responses?"
+  mode: CROSS
+  anchors: ["BaseClient.event_hooks", "Client._send_single_request"]
+- id: 18
+  question: "Show me ClientState."
+  mode: EXACT
+  anchors: ["ClientState"]
+- id: 19
+  question: "Where are URL and QueryParams defined?"
+  mode: EXACT
+  anchors: ["URL", "QueryParams"]
+- id: 20
+  question: "Why must the response stream be read or explicitly closed?"
+  mode: WHY
+  anchors: ["BaseTransport.handle_request", "AsyncBaseTransport.handle_async_request"]
+- id: 21
+  question: "Why does the client refuse to reopen a closed instance?"
+  mode: WHY+EXACT
+  anchors: ["Client.__enter__", "ClientState"]

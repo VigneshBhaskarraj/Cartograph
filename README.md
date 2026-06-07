@@ -13,12 +13,29 @@ Built as a privacy-first, correctness-first alternative to cloud GraphRAG code t
 - A **local embedding model** and an optional **local LLM** mean zero network calls by default.
 - The graph is exposed over **MCP**, so any coding agent can query structure-aware context on demand.
 
+## Quickstart
+```bash
+uv sync --extra dev                         # install (Python 3.12)
+uv run pytest                               # 17 tests, fully offline
+
+# Index any Python file or package, then query the graph
+uv run cartograph index path/to/pkg --db cartograph-out/graph.kuzu
+uv run cartograph query "what calls encode_request" --mode hybrid --k 8
+```
+Modes: `vector`, `graph`, `lexical`, `hybrid` (RRF fusion). The default embedder is an
+offline feature-hash model — set `CARTOGRAPH_EMBEDDER=ollama` for real local semantic
+embeddings (still zero egress; only talks to `127.0.0.1`).
+
 ## Status / roadmap
-- [ ] M0 — vertical slice (extract → store → embed → query, one Python repo)
-- [ ] M1 — evaluation harness
-- [ ] M2 — hybrid retrieval + reranker
+- [x] M0 — vertical slice (extract → store → embed → query, one Python file → httpx)
+- [x] M1 — evaluation harness (21 questions over `httpx`, recall@k / precision@k / MRR, per-mode)
+- [~] M2 — hybrid retrieval + reranker (RRF fusion landed and beats single-signal baselines; reranker pending)
 - [ ] M3 — real symbol resolution (SCIP / stack-graphs)
 - [ ] M4 — MCP server, incremental updates, SQL-schema-in-graph
+
+**Latest eval** (httpx==0.27.2, offline embedder): `hybrid+rrf` leads on recall@5 (0.71),
+recall@10 (0.76), and MRR (0.40), beating both vector-only and graph-only.
+Full table and interpretation: [`eval/README.md`](./eval/README.md).
 
 ## License
 MIT
