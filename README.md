@@ -39,4 +39,5 @@ graph — closing that gap is what the M2 reranker is for. Honest table and inte
 [`eval/README.md`](./eval/README.md).
 
 ## License
-MIT
+[Apache License 2.0](./LICENSE) — permissive, with an explicit patent grant suited to
+regulated-enterprise adoption. See also [`NOTICE`](./NOTICE).
