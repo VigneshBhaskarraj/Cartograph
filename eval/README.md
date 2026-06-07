@@ -78,6 +78,36 @@ Run with `bash eval/run_local.sh` (see [`docs/local-setup.md`](../docs/local-set
 - **Caveat:** 21 questions is a small set — a 0.06 MRR gap is ≈ one question's worth of
   rank movement. Direction is clear and matches theory; magnitudes are indicative.
 
+## Results — M2 reranker (LLM-as-reranker via Ollama)
+
+Run with `bash eval/run_rerank.sh <model>`. The reranker re-orders the fused top-20 with
+one listwise LLM call per query, then **blends** that order with the retrieval order via
+RRF (so it can't blindly demote retrieved hits).
+
+| retriever | recall@5 | recall@10 | precision@5 | mrr | exact |
+| --- | --- | --- | --- | --- | --- |
+| vector+nomic | 0.667 | **0.81** | 0.40 | 0.521 | **1.00** |
+| hybrid+rrf | 0.667 | **0.81** | 0.32 | 0.464 | 0.75 |
+| rerank+`llama3.2:3b` | 0.286 | 0.619 | 0.24 | 0.240 | 0.75 |
+| **rerank+`gemma3:12b`** | **0.714** | 0.762 | **0.40** | **0.583** | 0.50 |
+
+### Findings
+- **Reranker model size matters a lot.** A 3B model produced near-random listwise
+  orderings and *wrecked* the results (MRR 0.24). A 12B model (`gemma3:12b`) instead
+  gave the **best MRR (0.583)**, **best recall@5 (0.714)**, and best precision@5 (0.40)
+  in the whole suite — exactly the top-rank quality a reranker is for.
+- **The blend earns its keep.** Fusing the LLM order with the retrieval order (vs.
+  trusting the LLM blindly) lifted MRR 0.542 → **0.583** and recall@5 0.667 → **0.714**.
+- **The honest trade:** recall@10 dips to 0.762 (EXACT 0.50). When the LLM strongly
+  demotes an exact symbol-name match, the RRF blend softens but doesn't always rescue it
+  past rank 10. So **rerank is opt-in; `hybrid` stays the default** when max recall@10
+  matters. For an agent consuming top-k context, rerank (best MRR/recall@5/precision@5)
+  is the better pick.
+
+**M2 outcome:** RRF fusion + personalized-PageRank graph + an opt-in LLM reranker. The
+reranker moves MRR up decisively with a strong-enough model; the recall@10/EXACT trade is
+documented, not hidden. Next precision lever is M3 (real symbol resolution).
+
 ## Honesty notes
 - **Call edges are heuristic (INFERRED).** A call to a common method name with no
   same-module definition links to *every* class defining that name (e.g. one

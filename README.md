@@ -29,16 +29,15 @@ embeddings (still zero egress; only talks to `127.0.0.1`).
 ## Status / roadmap
 - [x] M0 — vertical slice (extract → store → embed → query, one Python file → httpx)
 - [x] M1 — evaluation harness (21 questions over `httpx`, recall@k / precision@k / MRR, per-mode)
-- [~] M2 — hybrid retrieval + reranker (RRF fusion + personalized-PageRank graph landed; LLM-as-reranker stage landed, verifying numbers locally via Ollama)
+- [x] M2 — hybrid retrieval + reranker (RRF fusion + personalized-PageRank graph + opt-in LLM reranker)
 - [ ] M3 — real symbol resolution (SCIP / stack-graphs)
 - [ ] M4 — MCP server, incremental updates, SQL-schema-in-graph
 
-**Latest eval** (httpx==0.27.2). With **real local embeddings** (`nomic-embed-text` via
-Ollama) the vector leg reaches recall@10 **0.81** / MRR **0.52** / SEMANTIC **0.71**;
-`hybrid+rrf` ties on recall@10 (0.81) and wins CROSS, but equal-weight RRF now *dilutes*
-the strong vector leg on ordering (hybrid MRR 0.46 < vector 0.52) — the data-driven
-trigger for the M2 cross-encoder reranker. The offline-embedder baseline and full
-per-mode tables (incl. the personalized-PageRank graph) are in [`eval/README.md`](./eval/README.md).
+**Latest eval** (httpx==0.27.2, real `nomic-embed-text` embeddings). `vector`/`hybrid`
+reach recall@10 **0.81**; the opt-in **LLM reranker** (`gemma3:12b`, blended with the
+fused order) leads top-rank quality — **MRR 0.583, recall@5 0.714, precision@5 0.40** —
+at a small recall@10/EXACT trade, so `hybrid` stays the default. Full tables, the
+offline baseline, and the reranker trade-off: [`eval/README.md`](./eval/README.md).
 
 ## License
 [Apache License 2.0](./LICENSE) — permissive, with an explicit patent grant suited to

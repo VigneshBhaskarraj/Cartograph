@@ -3,3 +3,4 @@ run,retriever,recall@5,recall@10,precision@5,mrr,struct@10,multihop@10,semantic@
 2026-06-07,lexical,0.619,0.762,0.24,0.343,0.8,0.75,0.571,0.75,1.0,0.5
 2026-06-07,graph,0.619,0.762,0.2,0.313,0.8,1.0,0.571,0.5,1.0,0.5
 2026-06-07,hybrid+ollama:nomic-embed-text,0.667,0.81,0.32,0.464,0.8,1.0,0.714,0.75,1.0,0.5
+2026-06-07,rerank+ollama:nomic-embed-text+ollama:gemma3:12b,0.714,0.762,0.4,0.583,0.8,1.0,0.714,0.5,1.0,0.5
