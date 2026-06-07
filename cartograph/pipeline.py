@@ -32,10 +32,16 @@ def embed_graph(graph: Graph, embedder=None) -> None:
 
 
 def index_path(path: Path, db_path: Path, dim: int = DEFAULT_DIM, embedder=None, overwrite: bool = True) -> Store:
-    """Parse → embed → store. Returns the open Store."""
+    """Parse → embed → store. Returns the open Store.
+
+    The Kuzu vector column is sized to the embedder's *actual* output dimension, so
+    swapping models (hash 768, nomic 768, mxbai 1024, …) just works without touching
+    the schema.
+    """
     embedder = embedder or get_embedder(dim=dim)
     graph = build_graph(path)
     embed_graph(graph, embedder=embedder)
-    store = Store.create(db_path, dim=dim, overwrite=overwrite)
-    store.load(graph, dim=dim)
+    actual_dim = len(graph.nodes[0].embedding) if graph.nodes and graph.nodes[0].embedding else dim
+    store = Store.create(db_path, dim=actual_dim, overwrite=overwrite)
+    store.load(graph, dim=actual_dim)
     return store
