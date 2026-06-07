@@ -147,6 +147,16 @@ class Store:
             vecs.append(list(r[1]) if r[1] is not None else [])
         return ids, vecs
 
+    def all_edges(self) -> list[tuple[str, str]]:
+        """Every (src, dst) across all rel tables — for in-memory graph algorithms."""
+        out: list[tuple[str, str]] = []
+        for et in EDGE_TYPES:
+            res = self.conn.execute(f"MATCH (a:CodeNode)-[:{et}]->(b:CodeNode) RETURN a.id, b.id")
+            while res.has_next():
+                r = res.get_next()
+                out.append((r[0], r[1]))
+        return out
+
     def neighbors(self, node_id: str, hops: int = 1) -> list[str]:
         res = self.conn.execute(
             f"MATCH (a:CodeNode {{id:$id}})-[*1..{hops}]-(b:CodeNode) RETURN DISTINCT b.id",

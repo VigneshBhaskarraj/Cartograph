@@ -20,21 +20,26 @@ done
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | vector+hash | 0.429 | 0.667 | 0.20 | 0.305 | 0.60 | 0.75 | 0.43 | 0.75 | 0.67 | 1.00 |
 | lexical (BM25) | 0.619 | 0.762 | 0.24 | 0.343 | 0.80 | 0.75 | 0.57 | 0.75 | 1.00 | 0.50 |
-| graph (PPR-lite) | 0.619 | 0.667 | 0.28 | 0.385 | 0.80 | 0.75 | 0.43 | 0.50 | 1.00 | 0.00 |
-| **hybrid+rrf** | **0.667** | **0.762** | 0.24 | 0.380 | 0.80 | 0.75 | 0.57 | 0.75 | 1.00 | 0.50 |
+| graph (PPR) | 0.619 | 0.762 | 0.20 | 0.313 | 0.80 | **1.00** | 0.57 | 0.50 | 1.00 | 0.50 |
+| **hybrid+rrf** | **0.667** | **0.762** | 0.28 | 0.364 | 0.80 | 0.75 | 0.57 | 0.75 | 1.00 | 0.50 |
 
 (per-mode columns are recall@10)
 
 ## Reading it
 - **Hybrid wins on recall — the headline metric.** `hybrid+rrf` beats both
   `vector-only` and `graph-only` on recall@5 **and** recall@10; fusion recovers what
-  each single signal misses (e.g. it inherits vector's SEMANTIC and lexical's EXACT
-  while keeping graph's STRUCT/CROSS).
-- **MRR is the honest gap.** Hybrid's MRR (0.38) edges out vector but sits a hair
-  *below* graph (0.385): RRF improves coverage but slightly dilutes the top rank that
-  pure graph nails on structural questions. This is exactly the case the eval doc says
-  the **cross-encoder reranker** (M2 stage 2) exists to fix — re-scoring the fused
-  top-K to push the right node to rank 1. Not yet implemented; reported, not papered over.
+  each single signal misses (it inherits vector's SEMANTIC and lexical's EXACT while
+  keeping graph's STRUCT/CROSS).
+- **Graph is now personalized PageRank.** Replacing k-hop BFS with PPR lifted
+  graph-only recall@10 (0.667 → 0.762) and took **MULTIHOP to 1.00** (0.75 → 1.00) and
+  SEMANTIC to 0.57 — PPR follows call/inheritance chains the BFS decay cut off. The
+  cost is graph-only MRR (0.385 → 0.313): PPR spreads mass, so the exact seed isn't
+  always rank-1. That's the intended trade per the eval doc's **efficiency rule** —
+  *first push each retriever's solo recall up, then fix ordering with the reranker.*
+- **MRR is the honest open gap.** Hybrid's MRR (0.36) beats vector but trails the
+  pre-PPR graph; ordering is precisely what the **cross-encoder reranker** (M2 stage 2)
+  exists to fix — re-scoring the fused top-K to push the right node to rank 1. Not yet
+  implemented (needs a local model via Ollama); reported, not papered over.
 - **The per-mode columns diagnose, as designed.** Vector is the weakest leg —
   *because the offline `hash` embedder is feature-hashed bag-of-words, not a semantic
   model*. SEMANTIC recall (0.43 for vector) is the honest ceiling of a non-semantic

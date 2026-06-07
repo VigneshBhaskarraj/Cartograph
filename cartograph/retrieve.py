@@ -50,6 +50,7 @@ class Retriever:
             embedder = get_embedder(dim=dim) if dim else get_embedder()
         self.embedder = embedder
         self._build_lexical()
+        self._build_adjacency()
 
     # -- lexical (BM25) -------------------------------------------------------
     def _build_lexical(self) -> None:
@@ -89,32 +90,59 @@ class Retriever:
         scored.sort(key=lambda x: -x[1])
         return scored[:k]
 
+    # -- graph adjacency (for PPR) -------------------------------------------
+    def _build_adjacency(self) -> None:
+        """Undirected, row-normalized transition matrix over non-external nodes."""
+        self.node_index = {nid: i for i, nid in enumerate(d["id"] for d in self.docs)}
+        n = len(self.node_index)
+        self.adj: list[list[int]] = [[] for _ in range(n)]
+        for src, dst in self.store.all_edges():
+            i, j = self.node_index.get(src), self.node_index.get(dst)
+            if i is not None and j is not None and i != j:
+                self.adj[i].append(j)
+                self.adj[j].append(i)  # undirected: callers <-> callees
+
     # -- vector ---------------------------------------------------------------
     def vector(self, query: str, k: int = 10) -> list[tuple[str, float]]:
         qv = self.embedder.embed(query)
         return _cosine_ranking(qv, self.ids, self.vecs)[:k]
 
-    # -- graph ----------------------------------------------------------------
-    def graph(self, query: str, k: int = 10, hops: int = 2, seed_k: int = 5, decay: float = 0.5) -> list[tuple[str, float]]:
+    # -- graph (personalized PageRank) ---------------------------------------
+    def graph(self, query: str, k: int = 10, seed_k: int = 8, alpha: float = 0.85, iters: int = 30) -> list[tuple[str, float]]:
+        """Seed a restart distribution from lexical matches, then run PPR over the
+        whole graph. Structure-aware multi-hop scoring; favours nodes that are both
+        near the seeds and well-connected in the call/inheritance graph."""
         seeds = self.lexical(query, k=seed_k)
-        if not seeds:
+        n = len(self.node_index)
+        if not seeds or n == 0:
             return []
-        scores: dict[str, float] = defaultdict(float)
-        for seed_id, seed_score in seeds:
-            scores[seed_id] += seed_score
-            frontier = {seed_id}
-            visited = {seed_id}
-            for h in range(1, hops + 1):
-                nxt: set[str] = set()
-                for nid in frontier:
-                    for nb in self.store.neighbors(nid, hops=1):
-                        if nb not in visited and nb in self.valid:
-                            scores[nb] += seed_score * (decay ** h)
-                            nxt.add(nb)
-                            visited.add(nb)
-                frontier = nxt
-        ranked = sorted(scores.items(), key=lambda x: -x[1])
-        return ranked[:k]
+        # Restart vector p: mass on lexical seeds, weighted by their scores.
+        p = np.zeros(n, dtype=np.float64)
+        for sid, sscore in seeds:
+            idx = self.node_index.get(sid)
+            if idx is not None:
+                p[idx] += sscore
+        if p.sum() == 0:
+            return []
+        p /= p.sum()
+        r = p.copy()
+        for _ in range(iters):
+            nxt = np.zeros(n, dtype=np.float64)
+            for i, nbrs in enumerate(self.adj):
+                if r[i] and nbrs:
+                    share = r[i] / len(nbrs)
+                    for j in nbrs:
+                        nxt[j] += share
+            nxt = alpha * nxt + (1.0 - alpha) * p
+            # Dangling mass (nodes with no edges) returns via restart.
+            nxt += (1.0 - nxt.sum()) * p
+            if np.abs(nxt - r).sum() < 1e-9:
+                r = nxt
+                break
+            r = nxt
+        ids = [d["id"] for d in self.docs]
+        order = np.argsort(-r)
+        return [(ids[i], float(r[i])) for i in order[:k] if r[i] > 0]
 
     # -- fusion ---------------------------------------------------------------
     def hybrid(self, query: str, k: int = 10, rrf_k: int = 60) -> list[tuple[str, float]]:
