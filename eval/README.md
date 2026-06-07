@@ -49,6 +49,35 @@ done
   leg should rise and pull hybrid further up, with no code change. That, plus the
   reranker, is M2.
 
+## Results — real embeddings (`nomic-embed-text` via Ollama, on Apple M4)
+
+Run with `bash eval/run_local.sh` (see [`docs/local-setup.md`](../docs/local-setup.md)).
+
+| retriever | recall@5 | recall@10 | precision@5 | mrr | struct | multihop | semantic | exact | cross | why |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| **vector+nomic** | 0.667 | **0.81** | **0.40** | **0.521** | 0.80 | 1.00 | 0.71 | **1.00** | 0.67 | 1.00 |
+| lexical (BM25) | 0.619 | 0.762 | 0.24 | 0.343 | 0.80 | 0.75 | 0.57 | 0.75 | 1.00 | 0.50 |
+| graph (PPR) | 0.619 | 0.762 | 0.20 | 0.313 | 0.80 | 1.00 | 0.57 | 0.50 | 1.00 | 0.50 |
+| hybrid+rrf | 0.667 | **0.81** | 0.32 | 0.464 | 0.80 | 1.00 | 0.71 | 0.75 | 1.00 | 0.50 |
+
+(per-mode columns are recall@10)
+
+### What changed vs the offline embedder, and the key finding
+- **The embedder was the bottleneck.** Real embeddings lifted the vector leg hugely:
+  recall@10 0.667 → **0.81**, MRR 0.305 → **0.521**, SEMANTIC 0.43 → **0.71**, EXACT
+  0.75 → **1.00**. The offline `hash` numbers were an artificial floor.
+- **With a strong embedder, RRF now *underperforms* the best single leg on ordering.**
+  `vector-only` MRR (0.521) > `hybrid` MRR (0.464): equal-weight RRF dilutes the
+  dominant vector signal with the weaker lexical (MRR 0.34) and graph (MRR 0.31) legs.
+  Hybrid still ties on recall@10 and wins **CROSS** (1.00 vs 0.67) — fusion helps
+  coverage, but hurts top-rank ordering.
+- **This is the eval-doc trigger for the reranker.** "Add the cross-encoder reranker
+  only once RRF plateaus." It has: re-scoring the fused top-K by `(query, node-context)`
+  relevance is exactly what should pull MRR back above vector-only without losing the
+  recall/CROSS coverage that fusion buys. That is the next M2 task.
+- **Caveat:** 21 questions is a small set — a 0.06 MRR gap is ≈ one question's worth of
+  rank movement. Direction is clear and matches theory; magnitudes are indicative.
+
 ## Honesty notes
 - **Call edges are heuristic (INFERRED).** A call to a common method name with no
   same-module definition links to *every* class defining that name (e.g. one
