@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 from .cache import EmbeddingCache
@@ -15,6 +16,16 @@ def _files(path: Path, suffix: str) -> list[Path]:
     if path.is_file():
         return [path] if path.suffix == suffix else []
     return sorted(p for p in path.rglob(f"*{suffix}") if "__pycache__" not in p.parts)
+
+
+def _file_digests(path: Path) -> dict[str, str]:
+    """{repo-relative path: sha256(content)} for every indexed source file."""
+    pkg_parent = path.parent
+    out: dict[str, str] = {}
+    for f in _files(path, ".py") + _files(path, ".sql"):
+        rel = f.relative_to(pkg_parent).as_posix() if f.is_relative_to(pkg_parent) else f.name
+        out[rel] = hashlib.sha256(f.read_bytes()).hexdigest()
+    return out
 
 
 def build_graph(path: Path, resolver: str = "heuristic") -> Graph:
@@ -85,4 +96,38 @@ def index_path(path: Path, db_path: Path, dim: int = DEFAULT_DIM, embedder=None,
     store.set_meta("embedder_backend", backend)
     store.set_meta("embedder_model", model)
     store.set_meta("embedding_dim", str(actual_dim))
+    # Per-file content hashes, so `update` can detect what changed without re-embedding.
+    for rel, sha in _file_digests(path).items():
+        store.set_meta(f"file:{rel}", sha)
     return store
+
+
+def diff_files(path: Path, db_path: Path) -> dict[str, list[str]]:
+    """Compare on-disk files to the hashes recorded in the graph. Returns
+    {changed, added, deleted} (paths). 'changed' includes 'added' for convenience."""
+    cur = _file_digests(path)
+    store = Store(db_path)
+    prev = {k[len("file:"):]: v for k, v in store.all_meta().items() if k.startswith("file:")}
+    store.close()
+    changed = sorted(r for r, s in cur.items() if prev.get(r) != s)
+    added = sorted(set(cur) - set(prev))
+    deleted = sorted(set(prev) - set(cur))
+    return {"changed": changed, "added": added, "deleted": deleted}
+
+
+def update_index(path: Path, db_path: Path, dim: int = DEFAULT_DIM, embedder=None,
+                 resolver: str = "heuristic") -> dict:
+    """Incremental re-index: no-op when nothing changed (instant), otherwise a
+    cache-accelerated rebuild (only changed symbols re-embed; full rebuild guarantees
+    no stale nodes/edges). Returns a summary dict."""
+    path, db_path = Path(path), Path(db_path)
+    if not db_path.exists():
+        index_path(path, db_path, dim=dim, embedder=embedder, resolver=resolver).close()
+        return {"status": "indexed", "changed": sorted(_file_digests(path)), "added": [], "deleted": []}
+    delta = diff_files(path, db_path)
+    if not (delta["changed"] or delta["deleted"]):
+        return {"status": "up-to-date", **delta, "embedded": 0, "reused": 0}
+    store = index_path(path, db_path, dim=dim, embedder=embedder, overwrite=True, resolver=resolver)
+    reused, embedded = getattr(store, "cache_stats", (0, 0))
+    store.close()
+    return {"status": "updated", **delta, "embedded": embedded, "reused": reused}

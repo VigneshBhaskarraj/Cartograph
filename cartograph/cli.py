@@ -7,7 +7,7 @@ from pathlib import Path
 import typer
 
 from .embed import get_embedder
-from .pipeline import index_path
+from .pipeline import index_path, update_index
 from .retrieve import Retriever
 from .store import DEFAULT_DIM, Store
 
@@ -34,6 +34,25 @@ def index(
     typer.echo(f"  embeddings: {embedded} computed, {reused} reused from cache")
     for kkey, v in sorted(counts.items()):
         typer.echo(f"  {kkey}: {v}")
+
+
+@app.command()
+def update(
+    path: Path = typer.Argument(..., help="Python/SQL file or directory to re-index."),
+    db: str = typer.Option(DEFAULT_DB, help="Kuzu DB path."),
+    embedder: str = typer.Option(None, help="Embedder backend: hash | ollama."),
+    resolver: str = typer.Option("heuristic", help="Call resolver: heuristic | jedi."),
+) -> None:
+    """Incremental re-index: instant no-op when nothing changed; otherwise a
+    cache-accelerated rebuild (re-embeds only changed symbols, no stale edges)."""
+    summary = update_index(path, Path(db), dim=DEFAULT_DIM,
+                           embedder=get_embedder(embedder) if embedder else None, resolver=resolver)
+    typer.echo(f"{summary['status']}: {path} -> {db}")
+    if summary["status"] in ("updated", "indexed"):
+        typer.echo(f"  changed={len(summary['changed'])} deleted={len(summary['deleted'])} "
+                   f"| embeddings {summary.get('embedded', 0)} computed, {summary.get('reused', 0)} reused")
+    elif summary["status"] == "up-to-date":
+        typer.echo("  nothing changed — no re-embed, no rebuild")
 
 
 @app.command()
