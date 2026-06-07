@@ -10,10 +10,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 # Node kinds. A single node table distinguished by `kind` (see PLAN.md schema).
-KINDS = ("module", "class", "function", "method", "rationale", "external")
+KINDS = ("module", "class", "function", "method", "rationale", "external", "table", "column")
 
-# Edge types map 1:1 onto Kuzu REL tables.
-EDGE_TYPES = ("CALLS", "INHERITS", "IMPORTS", "CONTAINS", "DOCUMENTS")
+# Edge types map 1:1 onto Kuzu REL tables. REFERENCES = SQL foreign key.
+EDGE_TYPES = ("CALLS", "INHERITS", "IMPORTS", "CONTAINS", "DOCUMENTS", "REFERENCES")
 
 # Confidence tags carried by every edge (SPEC: EXTRACTED vs INFERRED).
 EXTRACTED = "EXTRACTED"  # deterministic structure (containment, inheritance, imports)
