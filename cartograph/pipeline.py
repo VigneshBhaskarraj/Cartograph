@@ -17,11 +17,11 @@ def _python_files(path: Path) -> list[Path]:
     return sorted(p for p in path.rglob("*.py") if "__pycache__" not in p.parts)
 
 
-def build_graph(path: Path) -> Graph:
+def build_graph(path: Path, resolver: str = "heuristic") -> Graph:
     files = _python_files(path)
     if not files:
         raise FileNotFoundError(f"no Python files under {path}")
-    return extract_paths(files, root=path)
+    return extract_paths(files, root=path, resolver=resolver)
 
 
 def embed_graph(graph: Graph, embedder=None, cache: EmbeddingCache | None = None) -> tuple[int, int]:
@@ -48,16 +48,17 @@ def embed_graph(graph: Graph, embedder=None, cache: EmbeddingCache | None = None
 
 
 def index_path(path: Path, db_path: Path, dim: int = DEFAULT_DIM, embedder=None, overwrite: bool = True,
-               use_cache: bool = True) -> Store:
+               use_cache: bool = True, resolver: str = "heuristic") -> Store:
     """Parse → embed → store. Returns the open Store.
 
     The Kuzu vector column is sized to the embedder's *actual* output dimension, so
     swapping models (hash 768, nomic 768, mxbai 1024, …) just works without touching
     the schema. A content-hash embedding cache (under <db_dir>/cache) makes re-indexing
-    a changed repo fast: only changed symbols are re-embedded.
+    a changed repo fast: only changed symbols are re-embedded. `resolver`: 'heuristic'
+    or 'jedi' (receiver-type call resolution).
     """
     embedder = embedder or get_embedder(dim=dim)
-    graph = build_graph(path)
+    graph = build_graph(path, resolver=resolver)
     cache = None
     if use_cache:
         cache = EmbeddingCache.for_embedder(Path(db_path).parent / "cache", getattr(embedder, "name", "hash"))

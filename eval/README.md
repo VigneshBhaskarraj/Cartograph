@@ -115,20 +115,21 @@ node* — surfaced by dogfooding the MCP server ("what does `Client.send` call?"
 phantom `AsyncClient.*` edges). `eval/call_precision.py` measures it against
 ground-truthed callee sets.
 
-| index | mean call-edge precision | recall |
-| --- | --- | --- |
-| before (name + same-module) | 0.500 | 0.800 |
-| **after (self-call → own class)** | **0.571** | 0.800 |
+| index (`--resolver`) | mean call-edge precision | recall | CALLS edges |
+| --- | --- | --- | --- |
+| name + same-module (pre-#8) | 0.500 | 0.800 | 722 |
+| `heuristic` (self-call → own class) | 0.571 | 0.800 | 666 |
+| **`jedi` (receiver-type inference)** | **1.000** | **1.000** | 492 |
 
-Resolving `self.`/`cls.` calls to the **caller's own class** kills the phantom sync↔async
-edges (`Client.send` no longer "calls" `AsyncClient._send_handling_auth`), removing 56
-cross-class edges (722 → 666). Run with `uv run python eval/call_precision.py`.
-The retrieval eval is unchanged (hybrid) — this is a *precision* fix the recall metric
-can't see, which is exactly why the precision metric was added.
-
-**Still wrong (needs M3 / SCIP):** non-`self` receiver calls — `response.read()` /
-`response.close()` resolve by bare method name to *every* class defining `read`/`close`
-(`Request.read`, `BoundSyncStream.close`, …). Real receiver-type inference is the M3 job.
+Two steps closed the gap:
+1. **`self.`/`cls.` → caller's own class** killed the phantom sync↔async edges
+   (`Client.send` no longer "calls" `AsyncClient._send_handling_auth`).
+2. **Jedi** (`uv run cartograph index … --resolver jedi`, needs `--extra resolve`)
+   infers the *receiver type*, so `response.read()` resolves to `Response.read` (not
+   `Request.read`) and external calls produce no edge. Perfect precision+recall on the
+   ground-truthed set; CALLS edges 666 → 492 as the wrong/external ones drop. Indexing
+   is slower (per-call `goto`), so `heuristic` stays the dependency-free default and
+   `jedi` is opt-in. Run `uv run python eval/call_precision.py --db <jedi-index>`.
 
 ## Honesty notes
 - **Call edges are heuristic (INFERRED).** Non-`self` method calls resolve by bare name,
