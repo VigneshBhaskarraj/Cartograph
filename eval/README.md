@@ -154,6 +154,10 @@ uv run python eval/run_eval.py --db cartograph-out/bridge.kuzu --questions eval/
 | graph (PPR) | 0.571 | 0.857 | 0.61 |
 | **hybrid+rrf** | 0.714 | **1.00** | **0.61** |
 
+With **real embeddings** (`nomic-embed-text`, via `bash eval/run_local_all.sh`): vector
+recall@10 **1.0** / MRR **0.905** / SEMANTIC **1.0**; hybrid recall@10 1.0 / MRR 0.76.
+Real vectors nail the model↔table bridge (offline vector MRR was 0.44).
+
 All code↔schema questions are answerable (recall@10 = 1.0 for vector/lexical/hybrid), and
 the structural bridge edges give graph/hybrid the best MRR — the unified graph pays off:
 an agent traverses `User` (model) →`MAPS_TO`→ `users` (table) →`REFERENCES`← `orders.user_id`
@@ -186,6 +190,11 @@ uv run python eval/run_eval.py --db cartograph-out/aidigest.kuzu --questions eva
 7 ground-truthed code↔schema questions; **~86% recall@10** on a real repo with the
 *offline* embedder (vector is hash-capped — a real embedder lifts the SEMANTIC ones).
 This validates the bridge end-to-end on code nobody wrote for the eval.
+
+With **real embeddings** (`nomic-embed-text`) the lift is dramatic: **vector recall@10
+0.43 → 1.0, MRR 0.43 → 0.77**, SEMANTIC/EXACT/CROSS all 1.0; and here **hybrid MRR (0.857)
+beats vector (0.771)** — graph/lexical add ordering signal fusion exploits. Real vectors
+matter most on real, natural-language-ish symbol/query text.
 
 ## Honesty notes
 - **Call edges are heuristic (INFERRED).** Non-`self` method calls resolve by bare name,
