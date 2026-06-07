@@ -40,8 +40,15 @@ def build_server(service: CartographService):
 
     @mcp.tool()
     def get_node(id: str) -> dict | None:
-        """Full detail for one node by its id (as returned by other tools)."""
+        """Full detail for one node. Accepts a node id OR a qualified name
+        (e.g. `httpx._client.Client.send`) — you don't need the internal id format."""
         return service.get_node(id)
+
+    @mcp.tool()
+    def resolve(ref: str) -> list[dict]:
+        """Find node(s) matching a reference (qualified name or bare name). Use to get a
+        precise id when a name is ambiguous (e.g. `send` -> Client.send, AsyncClient.send)."""
+        return service.resolve(ref)
 
     @mcp.tool()
     def neighbors(id: str, direction: str = "both", relation: str = "", hops: int = 1) -> list[dict]:
@@ -53,12 +60,14 @@ def build_server(service: CartographService):
 
     @mcp.tool()
     def calls(id: str) -> list[dict]:
-        """What this node calls — outgoing CALLS edges only. Use for 'what does X call'."""
+        """What this node calls — outgoing CALLS edges only. Use for 'what does X call'.
+        Accepts a node id or qualified name (e.g. `httpx._client.Client.send`)."""
         return service.calls(id)
 
     @mcp.tool()
     def callers(id: str) -> list[dict]:
-        """What calls this node — incoming CALLS edges only. Use for 'what calls X'."""
+        """What calls this node — incoming CALLS edges only. Use for 'what calls X'.
+        Accepts a node id or qualified name."""
         return service.callers(id)
 
     @mcp.tool()
