@@ -115,11 +115,13 @@ node* — surfaced by dogfooding the MCP server ("what does `Client.send` call?"
 phantom `AsyncClient.*` edges). `eval/call_precision.py` measures it against
 ground-truthed callee sets.
 
-| index (`--resolver`) | mean call-edge precision | recall | CALLS edges |
-| --- | --- | --- | --- |
-| name + same-module (pre-#8) | 0.500 | 0.800 | 722 |
-| `heuristic` (self-call → own class) | 0.571 | 0.800 | 666 |
-| **`jedi` (receiver-type inference)** | **1.000** | **1.000** | 492 |
+| index (`--resolver`) | mean call-edge precision | recall |
+| --- | --- | --- |
+| name + same-module (pre-#8) | 0.500 | 0.800 |
+| `heuristic` (self-call → own class) | 0.714 | 0.867 |
+| **`jedi` (receiver-type inference)** | **1.000** | **1.000** |
+
+(ground-truthed over `Client.send`, `AsyncClient.send`, `Client.get`; httpx CALLS edges 722 → 666 heuristic → 492 jedi)
 
 Two steps closed the gap:
 1. **`self.`/`cls.` → caller's own class** killed the phantom sync↔async edges

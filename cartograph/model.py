@@ -24,7 +24,7 @@ INFERRED = "INFERRED"  # heuristic, name-matched (call edges before M3 symbol re
 class Node:
     """One code object or rationale comment."""
 
-    id: str  # stable id: "<file_path>::<qualified_name>"
+    id: str  # stable id: code "<file>::<qualified_name>#<line>"; sql "<file>::table.<qual>"
     kind: str
     name: str
     qualified_name: str

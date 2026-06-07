@@ -105,6 +105,32 @@ def test_unknown_ref_is_empty(db):
     svc.close()
 
 
+def test_shortest_path(db):
+    """Regression: shortest_path must return a real path (Kuzu list-comp bug)."""
+    svc = CartographService(db)
+    path = svc.shortest_path("Dog.speak", "bark")  # Dog.speak -CALLS-> bark
+    assert len(path) >= 2
+    assert path[0]["qualified_name"].endswith("Dog.speak")
+    assert path[-1]["name"] == "bark"
+    svc.close()
+
+
+def test_rerank_mode_reachable_via_env(db, monkeypatch):
+    """Regression: `rerank` mode must actually rerank when configured, not silently hybrid."""
+    monkeypatch.setenv("CARTOGRAPH_RERANKER", "lexical")
+    svc = CartographService(db)
+    assert "rerank" in svc.modes
+    assert svc.query("dog bark sound", mode="rerank", k=5)
+    svc.close()
+
+
+def test_rerank_not_advertised_without_config(db, monkeypatch):
+    monkeypatch.delenv("CARTOGRAPH_RERANKER", raising=False)
+    svc = CartographService(db)
+    assert "rerank" not in svc.modes
+    svc.close()
+
+
 def test_missing_db_raises(tmp_path):
     with pytest.raises(FileNotFoundError):
         CartographService(tmp_path / "nope.kuzu")

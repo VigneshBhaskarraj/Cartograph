@@ -70,6 +70,8 @@ class OllamaReranker:
         self.name = f"ollama:{model}"
         self.model = model
         self.host = (host or os.environ.get("OLLAMA_HOST") or "http://127.0.0.1:11434").rstrip("/")
+        from .embed import _warn_if_remote
+        _warn_if_remote(self.host)
         self.max_chars = max_chars
         self._fallback = LexicalReranker()
 

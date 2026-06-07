@@ -237,13 +237,15 @@ class Store:
         return out
 
     def shortest_path(self, src: str, dst: str, max_hops: int = 8) -> list[str]:
+        # Return the path's nodes and pull ids in Python: Kuzu 0.11 rejects the
+        # `[n IN nodes(p) | n.id]` list-comprehension form ("variable not in scope").
         res = self.conn.execute(
             f"MATCH p = (a:CodeNode {{id:$s}})-[* SHORTEST 1..{max_hops}]-(b:CodeNode {{id:$d}}) "
-            f"RETURN [n IN nodes(p) | n.id] LIMIT 1",
+            f"RETURN nodes(p) LIMIT 1",
             {"s": src, "d": dst},
         )
         if res.has_next():
-            return list(res.get_next()[0])
+            return [n["id"] for n in res.get_next()[0]]
         return []
 
     def counts(self) -> dict[str, int]:

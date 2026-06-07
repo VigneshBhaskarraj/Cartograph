@@ -33,6 +33,9 @@ GOLD: dict[str, set[str]] = {
         "httpx._models.Response.aread",
         "httpx._models.Response.aclose",
     },
+    "httpx._client.Client.get": {
+        "httpx._client.Client.request",
+    },
 }
 
 

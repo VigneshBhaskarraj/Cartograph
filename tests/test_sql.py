@@ -28,6 +28,26 @@ def test_tables_columns_and_fk():
                and e.confidence == "EXTRACTED" for e in refs)
 
 
+def test_schema_qualified_and_dedup(tmp_path):
+    """Regression: schema-qualified names stay distinct; repeated DDL doesn't crash."""
+    sql = (
+        "CREATE TABLE public.users (id INTEGER PRIMARY KEY);\n"
+        "CREATE TABLE analytics.users (id INTEGER PRIMARY KEY);\n"
+        "CREATE TABLE public.users (id INTEGER PRIMARY KEY, name TEXT);\n"  # repeat
+    )
+    p = tmp_path / "multi.sql"
+    p.write_text(sql)
+    g = extract_sql_paths([p], root=p)
+    quals = sorted(n.qualified_name for n in g.nodes if n.kind == "table")
+    assert quals == ["analytics.users", "public.users"]  # distinct + deduped, no collision
+
+    from cartograph.pipeline import index_path
+
+    store = index_path(p, tmp_path / "m.kuzu", dim=32, overwrite=True)  # must not raise duplicate-PK
+    assert store.counts().get("node:table") == 2
+    store.close()
+
+
 def test_sql_indexed_into_same_graph(tmp_path):
     """SQL schema lands in the same Kuzu graph and is queryable via the service."""
     from cartograph.pipeline import index_path
