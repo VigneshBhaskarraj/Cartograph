@@ -45,9 +45,24 @@ embeddings the vector leg's SEMANTIC recall should rise and pull `hybrid` up fur
 verify it against the baseline table in [`eval/README.md`](../eval/README.md). That
 measured delta is the green light for the M2 reranker stage.
 
+## Reranker (M2 stage 2) — LLM-as-reranker via Ollama
+Once real embeddings are in, equal-weight RRF *dilutes* the strong vector leg on ordering
+(see `eval/README.md`). The reranker re-scores the fused top-K with a local LLM — one
+listwise call per query — to restore MRR. No new Python dependency; it uses a chat model
+you already have via Ollama.
+
+```bash
+ollama list                            # see your installed models
+bash eval/run_rerank.sh gemma2:9b      # or llama3.2:3b for a faster reranker
+```
+This indexes with real embeddings and prints `vector / lexical / graph / hybrid / rerank`
+side by side in `eval/results-ollama.csv`. A smaller model (3B) reranks faster; a larger
+one (your Gemma 12B) may order better — try both and compare MRR.
+
+Knobs: `CARTOGRAPH_RERANKER` (`identity` | `lexical` | `ollama`), `CARTOGRAPH_RERANK_MODEL`.
+The `identity`/`lexical` backends are offline and used by the test suite.
+
 ## Notes
-- **Reranker (M2 stage 2):** a cross-encoder isn't a first-class Ollama endpoint; it will
-  use a small local ONNX/`fastembed` model (a new dependency, flagged before adding) or an
-  LLM-as-reranker via Ollama generation. Added once real-embedding RRF plateaus.
 - **Throttling:** a fanless MacBook Air handles indexing + eval easily (seconds–minute);
-  only hours-long generative LLM workloads would thermally throttle.
+  only hours-long generative LLM workloads would thermally throttle. Listwise reranking is
+  one call per query (~21 total), so it's quick even with a 12B model.
