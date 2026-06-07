@@ -39,7 +39,7 @@ agent queries structure instead of grepping. Wiring + tool reference: [`docs/mcp
 - [x] M1 — evaluation harness (21 questions over `httpx`, recall@k / precision@k / MRR, per-mode)
 - [x] M2 — hybrid retrieval + reranker (RRF fusion + personalized-PageRank graph + opt-in LLM reranker)
 - [~] M3 — real symbol resolution: `self.`-call class resolution landed (call-edge precision 0.50→0.57); receiver-type inference (SCIP / stack-graphs) pending
-- [~] M4 — MCP server ✅ (query/get_node/neighbors/shortest_path/semantic_search); incremental updates + SQL-schema-in-graph pending
+- [~] M4 — MCP server ✅ + incremental indexing ✅ (content-hash embedding cache; re-index re-embeds only changed symbols); SQL-schema-in-graph pending
 
 **Latest eval** (httpx==0.27.2, real `nomic-embed-text` embeddings). `vector`/`hybrid`
 reach recall@10 **0.81**; the opt-in **LLM reranker** (`gemma3:12b`, blended with the
