@@ -11,17 +11,27 @@ from .model import Graph
 from .store import DEFAULT_DIM, Store
 
 
-def _python_files(path: Path) -> list[Path]:
+def _files(path: Path, suffix: str) -> list[Path]:
     if path.is_file():
-        return [path]
-    return sorted(p for p in path.rglob("*.py") if "__pycache__" not in p.parts)
+        return [path] if path.suffix == suffix else []
+    return sorted(p for p in path.rglob(f"*{suffix}") if "__pycache__" not in p.parts)
 
 
 def build_graph(path: Path, resolver: str = "heuristic") -> Graph:
-    files = _python_files(path)
-    if not files:
-        raise FileNotFoundError(f"no Python files under {path}")
-    return extract_paths(files, root=path, resolver=resolver)
+    py_files = _files(path, ".py")
+    graph = extract_paths(py_files, root=path, resolver=resolver) if py_files else Graph()
+    sql_files = _files(path, ".sql")
+    if sql_files:
+        try:
+            from .sql_extract import extract_sql_paths
+            schema = extract_sql_paths(sql_files, root=path)
+            graph.nodes.extend(schema.nodes)
+            graph.edges.extend(schema.edges)
+        except ModuleNotFoundError:
+            pass  # sqlglot not installed; skip SQL (install with `--extra sql`)
+    if not graph.nodes:
+        raise FileNotFoundError(f"no Python or SQL files under {path}")
+    return graph
 
 
 def embed_graph(graph: Graph, embedder=None, cache: EmbeddingCache | None = None) -> tuple[int, int]:
