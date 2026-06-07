@@ -16,10 +16,13 @@ ollama pull "${MODEL}"
 run_set () {  # name, db, questions(optional)
   local name="$1" db="$2" questions="${3:-}"
   echo; echo "### ${name}"
-  local qflag=(); [ -n "${questions}" ] && qflag=(--questions "${questions}")
   local out="/tmp/eval_${name}.csv"; rm -f "${out}"
   for R in vector lexical graph hybrid; do
-    uv run python eval/run_eval.py --db "${db}" --retriever "${R}" --embedder ollama "${qflag[@]}" --out "${out}"
+    if [ -n "${questions}" ]; then
+      uv run python eval/run_eval.py --db "${db}" --retriever "${R}" --embedder ollama --questions "${questions}" --out "${out}"
+    else
+      uv run python eval/run_eval.py --db "${db}" --retriever "${R}" --embedder ollama --out "${out}"
+    fi
   done
 }
 
