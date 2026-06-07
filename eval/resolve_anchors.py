@@ -21,12 +21,14 @@ def main() -> int:
     ap.add_argument("--db", default=DEFAULT_DB)
     ap.add_argument("--check", action="store_true", help="exit 1 if any anchor is unresolved")
     ap.add_argument("--out", default="eval/anchors.resolved.json")
+    ap.add_argument("--questions", default=None, help="path to a questions.yaml (default: the httpx set)")
     args = ap.parse_args()
 
     store, nodes = open_store(args.db)
     resolved: dict[str, dict] = {}
     unresolved: list[tuple[int, str]] = []
-    for q in load_questions():
+    questions = load_questions(Path(args.questions)) if args.questions else load_questions()
+    for q in questions:
         per_anchor = {}
         for a in q["anchors"]:
             ids = sorted(gold_ids([a], nodes))

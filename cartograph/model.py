@@ -12,8 +12,9 @@ from dataclasses import dataclass, field
 # Node kinds. A single node table distinguished by `kind` (see PLAN.md schema).
 KINDS = ("module", "class", "function", "method", "rationale", "external", "table", "column")
 
-# Edge types map 1:1 onto Kuzu REL tables. REFERENCES = SQL foreign key.
-EDGE_TYPES = ("CALLS", "INHERITS", "IMPORTS", "CONTAINS", "DOCUMENTS", "REFERENCES")
+# Edge types map 1:1 onto Kuzu REL tables. REFERENCES = SQL foreign key;
+# MAPS_TO = ORM model class -> SQL table (the code<->schema bridge).
+EDGE_TYPES = ("CALLS", "INHERITS", "IMPORTS", "CONTAINS", "DOCUMENTS", "REFERENCES", "MAPS_TO")
 
 # Confidence tags carried by every edge (SPEC: EXTRACTED vs INFERRED).
 EXTRACTED = "EXTRACTED"  # deterministic structure (containment, inheritance, imports)
@@ -38,6 +39,7 @@ class Node:
     embed_text: str = ""
     content_sha: str = ""
     embedding: list[float] | None = None
+    extra: dict = field(default_factory=dict)  # in-memory only (e.g. ORM __tablename__); not persisted
 
 
 @dataclass

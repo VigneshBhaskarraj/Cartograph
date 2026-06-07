@@ -1,0 +1,31 @@
+# Schema-bridging eval over eval/bridge_corpus (Python ORM models + schema.sql).
+# Tests whether retrieval answers code<->schema questions, enabled by MAPS_TO/REFERENCES
+# edges. Anchors confirmed against the indexed bridge corpus.
+- id: 1
+  question: "Which database table does the User model map to?"
+  mode: CROSS
+  anchors: ["users", "User"]
+- id: 2
+  question: "What model class maps to the orders table?"
+  mode: CROSS
+  anchors: ["models.Order", "orders"]
+- id: 3
+  question: "Where is the orders table defined?"
+  mode: EXACT
+  anchors: ["orders"]
+- id: 4
+  question: "Which column is the foreign key into the users table?"
+  mode: STRUCT
+  anchors: ["orders.user_id"]
+- id: 5
+  question: "What code fetches a user's orders?"
+  mode: SEMANTIC
+  anchors: ["orders_for_user"]
+- id: 6
+  question: "Where is a user's email stored in the database?"
+  mode: CROSS
+  anchors: ["users.email"]
+- id: 7
+  question: "Trace the User model down to its table's columns."
+  mode: MULTIHOP
+  anchors: ["users", "users.email"]

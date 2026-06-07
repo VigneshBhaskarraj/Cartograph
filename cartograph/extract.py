@@ -194,6 +194,9 @@ class _FileExtractor:
         cls = self._add("class", name, qual, node, body)
         self.edges.append(Edge("CONTAINS", parent_id, cls.id, EXTRACTED))
         self._scan_comments(node, cls.id)
+        tablename = self._orm_tablename(body)
+        if tablename:
+            cls.extra["tablename"] = tablename  # bridged to a SQL table in build_graph
         supers = node.child_by_field_name("superclasses")
         if supers is not None:
             for base in supers.named_children:
@@ -204,6 +207,21 @@ class _FileExtractor:
                     self.bases.append((cls.id, bname))
         if body is not None:
             self._walk(body, parent_id=cls.id, class_qual=qual)
+
+    def _orm_tablename(self, body: TSNode | None) -> str | None:
+        """`__tablename__ = "users"` / `db_table = "users"` in a class body -> 'users'."""
+        if body is None:
+            return None
+        for child in body.children:
+            stmt = child.named_children[0] if (child.type == "expression_statement" and child.named_children) else None
+            if stmt is None or stmt.type != "assignment":
+                continue
+            left = stmt.child_by_field_name("left")
+            right = stmt.child_by_field_name("right")
+            if (left is not None and right is not None and left.type == "identifier"
+                    and _text(self.src, left) in ("__tablename__", "db_table") and right.type == "string"):
+                return _clean_docstring(_text(self.src, right))
+        return None
 
     def _handle_function(self, node: TSNode, parent_id: str, class_qual: str | None) -> None:
         name_node = node.child_by_field_name("name")
