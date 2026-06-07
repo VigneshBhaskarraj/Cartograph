@@ -44,4 +44,10 @@ def index_path(path: Path, db_path: Path, dim: int = DEFAULT_DIM, embedder=None,
     actual_dim = len(graph.nodes[0].embedding) if graph.nodes and graph.nodes[0].embedding else dim
     store = Store.create(db_path, dim=actual_dim, overwrite=overwrite)
     store.load(graph, dim=actual_dim)
+    # Record the embedder so a reader (CLI query, MCP server) reconstructs a matching one.
+    name = getattr(embedder, "name", "hash")
+    backend, _, model = name.partition(":")
+    store.set_meta("embedder_backend", backend)
+    store.set_meta("embedder_model", model)
+    store.set_meta("embedding_dim", str(actual_dim))
     return store
