@@ -79,38 +79,71 @@ def extract_sql_source(source: str, rel_path: str, dialect: str | None = None):
         return nodes, edges, pending_fks
 
     for stmt in statements:
-        if not isinstance(stmt, exp.Create) or (stmt.kind or "").upper() != "TABLE":
-            continue
-        tbl = stmt.find(exp.Table)
-        if tbl is None:
-            continue
-        qual = _qual(tbl)
-        line = (stmt.meta or {}).get("line", 0) or 0
-        col_defs = list(stmt.find_all(exp.ColumnDef))
-        cols = [(c.name, (c.args.get("kind").sql() if c.args.get("kind") else "")) for c in col_defs]
-        table = _table_node(qual, tbl.name, cols, rel_path, line)
-        nodes.append(table)
-        col_ids: dict[str, str] = {}
-        for c, t in cols:
-            cn = _column_node(qual, c, t, rel_path, line)
-            nodes.append(cn)
-            col_ids[c] = cn.id
-            edges.append(Edge("CONTAINS", table.id, cn.id, EXTRACTED))
-
-        for fk in stmt.find_all(exp.ForeignKey):
-            ref = fk.args.get("reference")
-            target = ref.find(exp.Table) if ref is not None else None
-            if target is None:
-                continue
-            for lc in (i.name for i in fk.expressions):
-                pending_fks.append((col_ids.get(lc, table.id), _qual(target)))
-        for cdef in col_defs:
-            for r in cdef.find_all(exp.Reference):
-                target = r.find(exp.Table)
-                if target is not None:
-                    pending_fks.append((col_ids.get(cdef.name, table.id), _qual(target)))
+        if isinstance(stmt, exp.Create) and (stmt.kind or "").upper() == "TABLE":
+            _create_to_nodes(stmt, rel_path, nodes, edges, pending_fks)
 
     return nodes, edges, pending_fks
+
+
+def _create_to_nodes(stmt, rel_path: str, nodes: list, edges: list, pending_fks: list) -> None:
+    """Append table + column nodes, CONTAINS edges, and pending FKs for one CREATE TABLE."""
+    from sqlglot import exp
+
+    tbl = stmt.find(exp.Table)
+    if tbl is None:
+        return
+    qual = _qual(tbl)
+    line = (stmt.meta or {}).get("line", 0) or 0
+    col_defs = list(stmt.find_all(exp.ColumnDef))
+    cols = [(c.name, (c.args.get("kind").sql() if c.args.get("kind") else "")) for c in col_defs]
+    table = _table_node(qual, tbl.name, cols, rel_path, line)
+    nodes.append(table)
+    col_ids: dict[str, str] = {}
+    for c, t in cols:
+        cn = _column_node(qual, c, t, rel_path, line)
+        nodes.append(cn)
+        col_ids[c] = cn.id
+        edges.append(Edge("CONTAINS", table.id, cn.id, EXTRACTED))
+    for fk in stmt.find_all(exp.ForeignKey):
+        ref = fk.args.get("reference")
+        target = ref.find(exp.Table) if ref is not None else None
+        if target is None:
+            continue
+        for lc in (i.name for i in fk.expressions):
+            pending_fks.append((col_ids.get(lc, table.id), _qual(target)))
+    for cdef in col_defs:
+        for r in cdef.find_all(exp.Reference):
+            target = r.find(exp.Table)
+            if target is not None:
+                pending_fks.append((col_ids.get(cdef.name, table.id), _qual(target)))
+
+
+def extract_embedded_sql(units: list[tuple[str, str, str]], dialect: str | None = None):
+    """SQL embedded in Python strings. `units`: (owner_id, rel_path, sql_text).
+    Returns (table/col nodes, CONTAINS edges, pending_fks, pending_queries) where
+    pending_queries = (owner_function_id, referenced_table_qualified_name)."""
+    import sqlglot
+    from sqlglot import exp
+
+    nodes: list[Node] = []
+    edges: list[Edge] = []
+    pending_fks: list[tuple[str, str]] = []
+    pending_queries: list[tuple[str, str]] = []
+    for owner_id, rel_path, sql in units:
+        try:
+            statements = sqlglot.parse(sql, read=dialect)
+        except Exception:
+            continue
+        for stmt in statements:
+            if stmt is None:
+                continue
+            if isinstance(stmt, exp.Create) and (stmt.kind or "").upper() == "TABLE":
+                _create_to_nodes(stmt, rel_path, nodes, edges, pending_fks)
+            else:
+                # DML / queries: the enclosing function touches these tables.
+                for t in stmt.find_all(exp.Table):
+                    pending_queries.append((owner_id, _qual(t)))
+    return nodes, edges, pending_fks, pending_queries
 
 
 def extract_sql_paths(paths: list[Path], root: Path, dialect: str | None = None) -> Graph:

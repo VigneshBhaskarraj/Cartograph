@@ -161,6 +161,32 @@ in one place. Numbers are with the offline `hash` embedder (reproducible); a rea
 lifts the SEMANTIC question. The eval generalizes via `--questions`/`--db`, so pointing it
 at a real code+DB repo (e.g. `ai-digest`) is a corpus swap, not new code.
 
+### On a real repo: `ai-digest` (raw sqlite, embedded SQL)
+
+`ai-digest` has no ORM and no `.sql` files — its schema is `CREATE TABLE` inside
+`conn.executescript("""…""")`, and queries are raw `INSERT`/`SELECT` strings. Cartograph
+now extracts SQL from Python string literals: DDL → `table`/`column` nodes (+ FK
+`REFERENCES`), DML → **`QUERIES`** edges (function → table). 5 tables, 15 QUERIES edges
+were recovered; *"what code touches `top_stories`"* → `store_run`, `get_repeat_stories`,
+`init_db` (correct).
+
+```bash
+bash eval/get_aidigest.sh                                          # clone (gitignored)
+uv run cartograph index .corpus/ai-digest/src --db cartograph-out/aidigest.kuzu
+uv run python eval/run_eval.py --db cartograph-out/aidigest.kuzu --questions eval/aidigest_questions.yaml --retriever hybrid
+```
+
+| retriever | recall@5 | recall@10 | mrr |
+| --- | --- | --- | --- |
+| vector+hash | 0.43 | 0.43 | 0.43 |
+| lexical | 0.857 | 0.857 | 0.76 |
+| graph (PPR) | 0.857 | 0.857 | 0.60 |
+| **hybrid+rrf** | 0.571 | **0.857** | 0.61 |
+
+7 ground-truthed code↔schema questions; **~86% recall@10** on a real repo with the
+*offline* embedder (vector is hash-capped — a real embedder lifts the SEMANTIC ones).
+This validates the bridge end-to-end on code nobody wrote for the eval.
+
 ## Honesty notes
 - **Call edges are heuristic (INFERRED).** Non-`self` method calls resolve by bare name,
   so a `.read()`/`.close()` or a `transport.handle_request()` call links to *every* class

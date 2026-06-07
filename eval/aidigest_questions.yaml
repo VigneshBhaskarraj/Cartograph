@@ -1,0 +1,32 @@
+# Schema-bridging eval over a REAL repo: ai-digest (raw sqlite, SQL embedded in Python).
+# Tables come from CREATE TABLE in conn.executescript(...); QUERIES edges link functions
+# to the tables they read/write. Anchors confirmed against the indexed graph.
+# Fetch: bash eval/get_aidigest.sh   then index .corpus/ai-digest/src
+- id: 1
+  question: "Where is the database schema (tables) created?"
+  mode: CROSS
+  anchors: ["init_db"]
+- id: 2
+  question: "What code writes a run's results to the database?"
+  mode: CROSS
+  anchors: ["store_run", "runs"]
+- id: 3
+  question: "Where is the top_stories table defined?"
+  mode: EXACT
+  anchors: ["top_stories"]
+- id: 4
+  question: "What code reads repeat or recurring stories?"
+  mode: SEMANTIC
+  anchors: ["get_repeat_stories", "top_stories"]
+- id: 5
+  question: "Which functions use the entities table?"
+  mode: CROSS
+  anchors: ["entities", "get_entity_trend"]
+- id: 6
+  question: "What fetches recent context across the stored tables?"
+  mode: SEMANTIC
+  anchors: ["get_recent_context"]
+- id: 7
+  question: "Where are run statistics computed from the database?"
+  mode: CROSS
+  anchors: ["get_stats", "runs"]
