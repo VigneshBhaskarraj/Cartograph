@@ -77,7 +77,7 @@ def run(db: str, retriever_name: str, embedder_name: str | None, out: str | None
         "mrr": round(_mean(mrr), 3),
     }
     for m in MODE_COLS:
-        row[f"{m.lower()}@10"] = round(_mean(per_mode[m]), 3)
+        row[f"{m.lower()}@10"] = round(_mean(per_mode[m]), 3) if per_mode[m] else "n/a"
 
     _print_row(row)
     if out:
