@@ -33,11 +33,12 @@ embeddings (still zero egress; only talks to `127.0.0.1`).
 - [ ] M3 — real symbol resolution (SCIP / stack-graphs)
 - [ ] M4 — MCP server, incremental updates, SQL-schema-in-graph
 
-**Latest eval** (httpx==0.27.2, offline embedder): `hybrid+rrf` leads on recall@5 (0.67)
-and MRR (0.36) over both single-signal baselines and ties them on recall@10 (0.76). The
-graph leg now uses personalized PageRank — graph-only MULTIHOP recall hit 1.0. The
-remaining ordering gap is what the M2 reranker targets. Honest table and interpretation:
-[`eval/README.md`](./eval/README.md).
+**Latest eval** (httpx==0.27.2). With **real local embeddings** (`nomic-embed-text` via
+Ollama) the vector leg reaches recall@10 **0.81** / MRR **0.52** / SEMANTIC **0.71**;
+`hybrid+rrf` ties on recall@10 (0.81) and wins CROSS, but equal-weight RRF now *dilutes*
+the strong vector leg on ordering (hybrid MRR 0.46 < vector 0.52) — the data-driven
+trigger for the M2 cross-encoder reranker. The offline-embedder baseline and full
+per-mode tables (incl. the personalized-PageRank graph) are in [`eval/README.md`](./eval/README.md).
 
 ## License
 [Apache License 2.0](./LICENSE) — permissive, with an explicit patent grant suited to
