@@ -37,7 +37,8 @@ def _mean(xs: list[float]) -> float:
 
 
 def run(db: str, retriever_name: str, embedder_name: str | None, out: str | None,
-        reranker_name: str | None = None, rerank_model: str | None = None) -> dict:
+        reranker_name: str | None = None, rerank_model: str | None = None,
+        questions_path: Path | None = None) -> dict:
     store, nodes = open_store(db)
     embedder = get_embedder(embedder_name) if embedder_name else None
     reranker = get_reranker(reranker_name, rerank_model) if retriever_name == "rerank" else None
@@ -51,7 +52,8 @@ def run(db: str, retriever_name: str, embedder_name: str | None, out: str | None
     r5, r10, mrr, p5 = [], [], [], []
     per_mode: dict[str, list[float]] = {m: [] for m in MODE_COLS}
 
-    for q in load_questions():
+    questions = load_questions(questions_path) if questions_path else load_questions()
+    for q in questions:
         gold = gold_ids(q["anchors"], nodes)
         ranked = [nid for nid, _ in retriever.retrieve(q["question"], mode=retriever_name, k=10)]
         hit5 = recall_at_k(ranked, gold, 5)
@@ -111,8 +113,10 @@ def main() -> int:
     ap.add_argument("--reranker", default="ollama", help="identity | lexical | ollama (rerank mode)")
     ap.add_argument("--rerank-model", default=None, help="Ollama model for reranking (e.g. gemma2:9b)")
     ap.add_argument("--out", default="eval/results.csv")
+    ap.add_argument("--questions", default=None, help="path to a questions.yaml (default: the httpx set)")
     args = ap.parse_args()
-    run(args.db, args.retriever, args.embedder, args.out, args.reranker, args.rerank_model)
+    qp = Path(args.questions) if args.questions else None
+    run(args.db, args.retriever, args.embedder, args.out, args.reranker, args.rerank_model, qp)
     return 0
 
 

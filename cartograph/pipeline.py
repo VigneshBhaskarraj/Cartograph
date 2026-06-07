@@ -40,9 +40,31 @@ def build_graph(path: Path, resolver: str = "heuristic") -> Graph:
             graph.edges.extend(schema.edges)
         except ModuleNotFoundError:
             pass  # sqlglot not installed; skip SQL (install with `--extra sql`)
+    _bridge_models_to_tables(graph)
     if not graph.nodes:
         raise FileNotFoundError(f"no Python or SQL files under {path}")
     return graph
+
+
+def _bridge_models_to_tables(graph: Graph) -> None:
+    """Link ORM model classes to their SQL tables (MAPS_TO) — the code<->schema bridge.
+    Mapping comes from an explicit `__tablename__`, so it's EXTRACTED."""
+    from .model import EXTRACTED, Edge
+
+    by_qual = {n.qualified_name: n for n in graph.nodes if n.kind == "table"}
+    by_name: dict[str, Node] = {}
+    for n in graph.nodes:
+        if n.kind == "table":
+            by_name.setdefault(n.name, n)
+    seen = {(e.type, e.src, e.dst) for e in graph.edges}
+    for n in graph.nodes:
+        tn = n.extra.get("tablename") if n.kind == "class" else None
+        if not tn:
+            continue
+        tgt = by_qual.get(tn) or by_name.get(tn.rsplit(".", 1)[-1])
+        if tgt is not None and ("MAPS_TO", n.id, tgt.id) not in seen:
+            seen.add(("MAPS_TO", n.id, tgt.id))
+            graph.edges.append(Edge("MAPS_TO", n.id, tgt.id, EXTRACTED))
 
 
 def embed_graph(graph: Graph, embedder=None, cache: EmbeddingCache | None = None) -> tuple[int, int]:

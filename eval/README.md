@@ -133,6 +133,34 @@ Two steps closed the gap:
    is slower (per-call `goto`), so `heuristic` stays the dependency-free default and
    `jedi` is opt-in. Run `uv run python eval/call_precision.py --db <jedi-index>`.
 
+## Schema-bridging eval (code + DB in one graph)
+
+Corpus: `eval/bridge_corpus/` — a small SQLAlchemy-style app (`models.py`) mapped onto
+`schema.sql`. The bridge is `MAPS_TO` (model class → table, from `__tablename__`,
+EXTRACTED) alongside FK `REFERENCES`. 7 questions in `eval/bridge_questions.yaml` cross
+the code↔schema boundary ("which table does the `User` model map to", "what code fetches
+a user's orders", "FK into users", …).
+
+```bash
+uv run cartograph index eval/bridge_corpus --db cartograph-out/bridge.kuzu   # needs --extra sql
+uv run python eval/resolve_anchors.py --db cartograph-out/bridge.kuzu --questions eval/bridge_questions.yaml --check
+uv run python eval/run_eval.py --db cartograph-out/bridge.kuzu --questions eval/bridge_questions.yaml --retriever hybrid
+```
+
+| retriever | recall@5 | recall@10 | mrr |
+| --- | --- | --- | --- |
+| vector+hash | 0.857 | 1.00 | 0.44 |
+| lexical | 0.857 | 1.00 | 0.50 |
+| graph (PPR) | 0.571 | 0.857 | 0.61 |
+| **hybrid+rrf** | 0.714 | **1.00** | **0.61** |
+
+All code↔schema questions are answerable (recall@10 = 1.0 for vector/lexical/hybrid), and
+the structural bridge edges give graph/hybrid the best MRR — the unified graph pays off:
+an agent traverses `User` (model) →`MAPS_TO`→ `users` (table) →`REFERENCES`← `orders.user_id`
+in one place. Numbers are with the offline `hash` embedder (reproducible); a real embedder
+lifts the SEMANTIC question. The eval generalizes via `--questions`/`--db`, so pointing it
+at a real code+DB repo (e.g. `ai-digest`) is a corpus swap, not new code.
+
 ## Honesty notes
 - **Call edges are heuristic (INFERRED).** Non-`self` method calls resolve by bare name,
   so a `.read()`/`.close()` or a `transport.handle_request()` call links to *every* class
