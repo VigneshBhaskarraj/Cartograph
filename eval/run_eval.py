@@ -24,6 +24,7 @@ from evallib import (
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from cartograph.embed import get_embedder  # noqa: E402
+from cartograph.rerank import get_reranker  # noqa: E402
 from cartograph.retrieve import Retriever  # noqa: E402
 
 DEFAULT_DB = "cartograph-out/httpx.kuzu"
@@ -35,13 +36,17 @@ def _mean(xs: list[float]) -> float:
     return sum(xs) / len(xs) if xs else 0.0
 
 
-def run(db: str, retriever_name: str, embedder_name: str | None, out: str | None) -> dict:
+def run(db: str, retriever_name: str, embedder_name: str | None, out: str | None,
+        reranker_name: str | None = None, rerank_model: str | None = None) -> dict:
     store, nodes = open_store(db)
     embedder = get_embedder(embedder_name) if embedder_name else None
-    retriever = Retriever(store, embedder=embedder)
+    reranker = get_reranker(reranker_name, rerank_model) if retriever_name == "rerank" else None
+    retriever = Retriever(store, embedder=embedder, reranker=reranker)
     label = retriever_name
     if retriever_name in ("vector", "hybrid"):
         label = f"{retriever_name}+{retriever.embedder.name}"
+    elif retriever_name == "rerank" and reranker is not None:
+        label = f"rerank+{retriever.embedder.name}+{reranker.name}"
 
     r5, r10, mrr, p5 = [], [], [], []
     per_mode: dict[str, list[float]] = {m: [] for m in MODE_COLS}
@@ -100,11 +105,14 @@ def _append_csv(out: str, row: dict) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", default=DEFAULT_DB)
-    ap.add_argument("--retriever", default="hybrid", choices=["vector", "graph", "lexical", "hybrid"])
+    ap.add_argument("--retriever", default="hybrid",
+                    choices=["vector", "graph", "lexical", "hybrid", "rerank"])
     ap.add_argument("--embedder", default=None, help="hash | ollama (default: match index)")
+    ap.add_argument("--reranker", default="ollama", help="identity | lexical | ollama (rerank mode)")
+    ap.add_argument("--rerank-model", default=None, help="Ollama model for reranking (e.g. gemma2:9b)")
     ap.add_argument("--out", default="eval/results.csv")
     args = ap.parse_args()
-    run(args.db, args.retriever, args.embedder, args.out)
+    run(args.db, args.retriever, args.embedder, args.out, args.reranker, args.rerank_model)
     return 0
 
 

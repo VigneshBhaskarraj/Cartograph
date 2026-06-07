@@ -29,7 +29,7 @@ embeddings (still zero egress; only talks to `127.0.0.1`).
 ## Status / roadmap
 - [x] M0 — vertical slice (extract → store → embed → query, one Python file → httpx)
 - [x] M1 — evaluation harness (21 questions over `httpx`, recall@k / precision@k / MRR, per-mode)
-- [~] M2 — hybrid retrieval + reranker (RRF fusion + personalized-PageRank graph landed; reranker pending)
+- [~] M2 — hybrid retrieval + reranker (RRF fusion + personalized-PageRank graph landed; LLM-as-reranker stage landed, verifying numbers locally via Ollama)
 - [ ] M3 — real symbol resolution (SCIP / stack-graphs)
 - [ ] M4 — MCP server, incremental updates, SQL-schema-in-graph
 

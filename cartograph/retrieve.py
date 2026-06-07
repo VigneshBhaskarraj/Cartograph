@@ -33,12 +33,14 @@ def _cosine_ranking(query_vec: list[float], ids: list[str], vecs: list[list[floa
 class Retriever:
     """Loads the queryable indexes from the store once, answers many queries."""
 
-    def __init__(self, store: Store, embedder=None):
+    def __init__(self, store: Store, embedder=None, reranker=None):
         self.store = store
+        self.reranker = reranker
         # External-import stub nodes carry no content; they must never be answers
         # (counting them would inflate recall). Keep them out of every candidate set.
         self.docs = [d for d in store.all_nodes_text() if d["kind"] != "external"]
         self.valid = {d["id"] for d in self.docs}
+        self.text_by_id = {d["id"]: (d["embed_text"] or d["qualified_name"]) for d in self.docs}
         ids, vecs = store.all_embeddings()
         self.ids, self.vecs = [], []
         for i, v in zip(ids, vecs):
@@ -153,10 +155,24 @@ class Retriever:
         ]
         return rrf_fuse(rankings, k=k, rrf_k=rrf_k)
 
+    # -- rerank (second stage) ------------------------------------------------
+    def reranked(self, query: str, k: int = 10, pool: int = 20) -> list[tuple[str, float]]:
+        """Fuse, then reorder the top `pool` with the reranker. Falls back to the
+        fused order if no reranker is configured."""
+        fused = self.hybrid(query, k=pool)
+        if not self.reranker or not fused:
+            return fused[:k]
+        candidates = [(cid, self.text_by_id.get(cid, "")) for cid, _ in fused]
+        order = self.reranker.rerank(query, candidates)
+        rank_of = {cid: i for i, cid in enumerate(order)}
+        # Descending score so callers/printers stay consistent with other modes.
+        reordered = sorted(fused, key=lambda x: rank_of.get(x[0], len(order)))
+        return [(cid, float(len(reordered) - i)) for i, (cid, _) in enumerate(reordered)][:k]
+
     def retrieve(self, query: str, mode: str = "hybrid", k: int = 10) -> list[tuple[str, float]]:
         return {
             "vector": self.vector, "graph": self.graph,
-            "lexical": self.lexical, "hybrid": self.hybrid,
+            "lexical": self.lexical, "hybrid": self.hybrid, "rerank": self.reranked,
         }[mode](query, k=k)
 
 
