@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # Run ALL eval corpora with REAL embeddings (Ollama) on a local machine.
 # Prereqs: Ollama running; `uv sync --extra dev --extra sql`.
-# Usage: bash eval/run_local_all.sh [embed-model]   (default: nomic-embed-text)
+# Usage: bash eval/run_local_all.sh [embed-model] [rerank-model]
+#   bash eval/run_local_all.sh                              # nomic-embed-text, no rerank
+#   bash eval/run_local_all.sh nomic-embed-text gemma3:12b  # + a rerank row per corpus
 set -euo pipefail
 
 MODEL="${1:-nomic-embed-text}"
+RERANK_MODEL="${2:-}"
 HOST="${OLLAMA_HOST:-http://127.0.0.1:11434}"
 export CARTOGRAPH_EMBEDDER=ollama
 export CARTOGRAPH_OLLAMA_MODEL="$MODEL"
@@ -12,6 +15,7 @@ export CARTOGRAPH_OLLAMA_MODEL="$MODEL"
 echo "==> Checking Ollama at ${HOST}"
 curl -sf "${HOST}/api/tags" >/dev/null || { echo "ERROR: Ollama not reachable at ${HOST}." >&2; exit 1; }
 ollama pull "${MODEL}"
+[ -n "${RERANK_MODEL}" ] && ollama pull "${RERANK_MODEL}"
 
 run_set () {  # name, db, questions(optional)
   local name="$1" db="$2" questions="${3:-}"
@@ -24,6 +28,15 @@ run_set () {  # name, db, questions(optional)
       uv run python eval/run_eval.py --db "${db}" --retriever "${R}" --embedder ollama --out "${out}"
     fi
   done
+  if [ -n "${RERANK_MODEL}" ]; then
+    if [ -n "${questions}" ]; then
+      uv run python eval/run_eval.py --db "${db}" --retriever rerank --embedder ollama \
+        --reranker ollama --rerank-model "${RERANK_MODEL}" --questions "${questions}" --out "${out}"
+    else
+      uv run python eval/run_eval.py --db "${db}" --retriever rerank --embedder ollama \
+        --reranker ollama --rerank-model "${RERANK_MODEL}" --out "${out}"
+    fi
+  fi
 }
 
 echo "==> httpx (code eval)"
