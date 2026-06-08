@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 # Node kinds. A single node table distinguished by `kind` (see PLAN.md schema).
-KINDS = ("module", "class", "function", "method", "rationale", "external", "table", "column")
+KINDS = ("module", "class", "function", "method", "rationale", "external", "table", "column", "interface")
 
 # Edge types map 1:1 onto Kuzu REL tables. REFERENCES = SQL foreign key;
 # MAPS_TO = ORM model class -> SQL table; QUERIES = code function -> table it reads/writes

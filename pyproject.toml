@@ -24,6 +24,7 @@ dev = ["pytest>=8.0"]
 mcp = ["mcp>=1.2"]
 resolve = ["jedi>=0.19"]
 sql = ["sqlglot>=20"]
+ts = ["tree-sitter-typescript>=0.23"]
 
 [build-system]
 requires = ["hatchling"]
