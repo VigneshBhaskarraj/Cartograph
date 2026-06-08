@@ -22,7 +22,7 @@ def _file_digests(path: Path) -> dict[str, str]:
     """{repo-relative path: sha256(content)} for every indexed source file."""
     pkg_parent = path.parent
     out: dict[str, str] = {}
-    for f in _files(path, ".py") + _files(path, ".sql"):
+    for f in _files(path, ".py") + _files(path, ".sql") + _files(path, ".ts") + _files(path, ".tsx"):
         rel = f.relative_to(pkg_parent).as_posix() if f.is_relative_to(pkg_parent) else f.name
         out[rel] = hashlib.sha256(f.read_bytes()).hexdigest()
     return out
@@ -40,6 +40,15 @@ def build_graph(path: Path, resolver: str = "heuristic") -> Graph:
             graph.edges.extend(schema.edges)
         except ModuleNotFoundError:
             pass  # sqlglot not installed; skip SQL (install with `--extra sql`)
+    ts_files = _files(path, ".ts") + _files(path, ".tsx")
+    if ts_files:
+        try:
+            from .ts_extract import extract_ts_paths
+            tsg = extract_ts_paths(ts_files, root=path)
+            graph.nodes.extend(tsg.nodes)
+            graph.edges.extend(tsg.edges)
+        except ModuleNotFoundError:
+            pass  # tree-sitter-typescript not installed; skip (install with `--extra ts`)
     _extract_embedded_sql(graph)
     _bridge_models_to_tables(graph)
     if not graph.nodes:

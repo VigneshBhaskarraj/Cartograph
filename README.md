@@ -41,6 +41,7 @@ agent queries structure instead of grepping. Wiring + tool reference: [`docs/mcp
 - [x] M3 — real symbol resolution: `self.`-call class resolution + opt-in **Jedi** receiver-type inference (`--resolver jedi`); call-edge precision 0.50 → **1.0** on the ground-truthed set
 - [x] M4 — MCP server ✅ + incremental indexing ✅ (`cartograph update`: per-file SHA change detection, instant no-op; **row-level delta** — unchanged node rows kept, only changed ones recreated; re-embeds only changed symbols) + SQL-schema-in-graph ✅ (`CREATE TABLE` → `table`/`column` nodes + FK `REFERENCES` edges via `sqlglot`, `--extra sql`) — app code + DB schema in one graph
 - [x] M5 — code↔schema bridge: ORM `__tablename__` → table (`MAPS_TO`) **and** raw-SQL embedded in Python → tables + `QUERIES` edges (function → table); schema-bridging eval on a synthetic corpus (recall@10 **1.0**) **and the real `ai-digest` repo** (~0.86); generalized eval runner (`--questions`/`--db`)
+- [x] M6 — second language: **TypeScript/TSX** extractor via tree-sitter (`--extra ts`) — classes, interfaces, functions, arrow-const functions, methods, `extends` (INHERITS), imports, heuristic calls — into the same graph (polyglot: Python + TS in one store)
 
 **Latest eval** (httpx==0.27.2, real `nomic-embed-text` embeddings). `vector`/`hybrid`
 reach recall@10 **0.81**; the opt-in **LLM reranker** (`gemma3:12b`, blended with the
