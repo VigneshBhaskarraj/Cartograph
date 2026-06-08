@@ -119,9 +119,12 @@ def _create_to_nodes(stmt, rel_path: str, nodes: list, edges: list, pending_fks:
 
 
 def extract_embedded_sql(units: list[tuple[str, str, str]], dialect: str | None = None):
-    """SQL embedded in Python strings. `units`: (owner_id, rel_path, sql_text).
-    Returns (table/col nodes, CONTAINS edges, pending_fks, pending_queries) where
-    pending_queries = (owner_function_id, referenced_table_qualified_name)."""
+    """SQL embedded in Python strings. `units`: (owner_id, rel_path, sql_text). Returns
+    (nodes, CONTAINS edges, pending_fks, pending_queries, pending_joins, pending_cols):
+      pending_queries = (owner_id, table_name)        function touches a table
+      pending_joins   = (table_a, table_b)            tables joined in one statement
+      pending_cols    = (owner_id, table_name, col)   function touches a specific column
+    """
     import sqlglot
     from sqlglot import exp
 
@@ -129,6 +132,8 @@ def extract_embedded_sql(units: list[tuple[str, str, str]], dialect: str | None 
     edges: list[Edge] = []
     pending_fks: list[tuple[str, str]] = []
     pending_queries: list[tuple[str, str]] = []
+    pending_joins: list[tuple[str, str]] = []
+    pending_cols: list[tuple[str, str, str]] = []
     for owner_id, rel_path, sql in units:
         try:
             statements = sqlglot.parse(sql, read=dialect)
@@ -139,11 +144,23 @@ def extract_embedded_sql(units: list[tuple[str, str, str]], dialect: str | None 
                 continue
             if isinstance(stmt, exp.Create) and (stmt.kind or "").upper() == "TABLE":
                 _create_to_nodes(stmt, rel_path, nodes, edges, pending_fks)
-            else:
-                # DML / queries: the enclosing function touches these tables.
-                for t in stmt.find_all(exp.Table):
-                    pending_queries.append((owner_id, _qual(t)))
-    return nodes, edges, pending_fks, pending_queries
+                continue
+            # DML / queries: the enclosing function touches these tables.
+            for t in stmt.find_all(exp.Table):
+                pending_queries.append((owner_id, _qual(t)))
+            # JOIN relationships: relate the FROM table to each joined table.
+            frm = stmt.find(exp.From)
+            from_tbl = frm.find(exp.Table) if frm is not None else None
+            if from_tbl is not None:
+                for j in stmt.find_all(exp.Join):
+                    jt = j.find(exp.Table)
+                    if jt is not None and jt.name != from_tbl.name:
+                        pending_joins.append((from_tbl.name, jt.name))
+            # Column-level: columns qualified by an actual table name (not an alias).
+            for col in stmt.find_all(exp.Column):
+                if col.table:
+                    pending_cols.append((owner_id, col.table, col.name))
+    return nodes, edges, pending_fks, pending_queries, pending_joins, pending_cols
 
 
 def extract_sql_paths(paths: list[Path], root: Path, dialect: str | None = None) -> Graph:

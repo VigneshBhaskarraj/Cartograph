@@ -13,9 +13,10 @@ from dataclasses import dataclass, field
 KINDS = ("module", "class", "function", "method", "rationale", "external", "table", "column", "interface")
 
 # Edge types map 1:1 onto Kuzu REL tables. REFERENCES = SQL foreign key;
-# MAPS_TO = ORM model class -> SQL table; QUERIES = code function -> table it reads/writes
-# (from SQL embedded in Python strings) — both are the code<->schema bridge.
-EDGE_TYPES = ("CALLS", "INHERITS", "IMPORTS", "CONTAINS", "DOCUMENTS", "REFERENCES", "MAPS_TO", "QUERIES")
+# MAPS_TO = ORM model class -> SQL table; QUERIES = code function -> table/column it
+# reads/writes; JOINS = table <-> table relationship mined from query JOINs.
+EDGE_TYPES = ("CALLS", "INHERITS", "IMPORTS", "CONTAINS", "DOCUMENTS", "REFERENCES",
+              "MAPS_TO", "QUERIES", "JOINS")
 
 # Confidence tags carried by every edge (SPEC: EXTRACTED vs INFERRED).
 EXTRACTED = "EXTRACTED"  # deterministic structure (containment, inheritance, imports)
