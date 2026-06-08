@@ -1,0 +1,67 @@
+# Eval set over Flask (src/flask). `anchors` are dotted qualified-name suffixes;
+# a question is a hit if ANY anchor node appears in the retriever's top-k.
+# Confirmed against the pinned corpus.
+- id: 1
+  question: "What does full_dispatch_request call to actually run the view and produce a response?"
+  mode: STRUCT
+  anchors: ["Flask.dispatch_request", "Flask.preprocess_request", "Flask.finalize_request", "Flask.handle_user_exception"]
+- id: 2
+  question: "What is the base class that Flask inherits from?"
+  mode: STRUCT
+  anchors: ["App", "flask.sansio.app"]
+- id: 3
+  question: "Which classes subclass the base SessionInterface?"
+  mode: STRUCT
+  anchors: ["SecureCookieSessionInterface"]
+- id: 4
+  question: "What does wsgi_app call to dispatch the request?"
+  mode: STRUCT
+  anchors: ["Flask.full_dispatch_request", "Flask.request_context", "Flask.handle_exception"]
+- id: 5
+  question: "Trace the path from the Flask object being called as a WSGI app down to dispatch_request."
+  mode: MULTIHOP
+  anchors: ["Flask.__call__", "Flask.wsgi_app", "Flask.full_dispatch_request", "Flask.dispatch_request"]
+- id: 6
+  question: "How does the module-level url_for helper end up generating a URL on the app?"
+  mode: MULTIHOP
+  anchors: ["url_for", "Flask.url_for"]
+- id: 7
+  question: "How does an HTTPException raised in a view get turned into a response instead of crashing?"
+  mode: MULTIHOP
+  anchors: ["Flask.handle_user_exception", "Flask.handle_http_exception", "Flask.finalize_request"]
+- id: 8
+  question: "Where is the signed-cookie session loaded from the incoming request and saved back to the response?"
+  mode: SEMANTIC
+  anchors: ["SecureCookieSessionInterface.open_session", "SecureCookieSessionInterface.save_session"]
+- id: 9
+  question: "Where does Flask decide whether a coroutine view needs to be run in a sync wrapper?"
+  mode: SEMANTIC
+  anchors: ["Flask.ensure_sync", "Flask.async_to_sync"]
+- id: 10
+  question: "Where are flashed messages stored and later retrieved for display?"
+  mode: SEMANTIC
+  anchors: ["flash", "get_flashed_messages"]
+- id: 11
+  question: "What links the templating layer to the application context when rendering?"
+  mode: CROSS
+  anchors: ["render_template", "_render", "flask.templating"]
+- id: 12
+  question: "What connects the JSON provider on the app to the module-level jsonify function?"
+  mode: CROSS
+  anchors: ["jsonify", "DefaultJSONProvider.response", "JSONProvider.response"]
+- id: 13
+  question: "Show me the AppContext class and its push method."
+  mode: EXACT
+  anchors: ["AppContext", "AppContext.push"]
+- id: 14
+  question: "Where is copy_current_request_context defined?"
+  mode: EXACT
+  anchors: ["copy_current_request_context"]
+- id: 15
+  question: "Why is wsgi_app a separate method instead of being implemented directly in __call__?"
+  mode: WHY
+  anchors: ["Flask.wsgi_app"]
+- id: 16
+  question: "Why is the session opened before the request URL is matched during context push?"
+  mode: WHY
+  anchors: ["AppContext.push"]
