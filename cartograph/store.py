@@ -81,30 +81,45 @@ class Store:
         self.load_nodes(graph.nodes, dim)
         self.load_edges(graph.edges)
 
+    _BATCH = 1000
+
     def load_nodes(self, nodes, dim: int = DEFAULT_DIM) -> None:
         zero = [0.0] * dim
-        for n in nodes:
-            emb = n.embedding if n.embedding is not None else zero
-            self.conn.execute(
-                """
-                CREATE (c:CodeNode {
-                    id: $id, kind: $kind, name: $name, qualified_name: $qn, module: $module,
-                    file_path: $fp, start_line: $sl, end_line: $el,
-                    signature: $sig, docstring: $doc, code: $code, embed_text: $et,
-                    embedding: $emb, content_sha: $sha
-                })
-                """,
-                {
-                    "id": n.id, "kind": n.kind, "name": n.name, "qn": n.qualified_name,
-                    "module": n.module, "fp": n.file_path, "sl": n.start_line, "el": n.end_line,
-                    "sig": n.signature, "doc": n.docstring, "code": n.code, "et": n.embed_text,
-                    "emb": emb, "sha": n.content_sha,
-                },
-            )
+        rows = [{
+            "id": n.id, "kind": n.kind, "name": n.name, "qn": n.qualified_name,
+            "module": n.module, "fp": n.file_path, "sl": n.start_line, "el": n.end_line,
+            "sig": n.signature, "doc": n.docstring, "code": n.code, "et": n.embed_text,
+            "emb": (n.embedding if n.embedding is not None else zero), "sha": n.content_sha,
+        } for n in nodes]
+        q = ("UNWIND $rows AS r CREATE (c:CodeNode {"
+             "id: r.id, kind: r.kind, name: r.name, qualified_name: r.qn, module: r.module,"
+             "file_path: r.fp, start_line: r.sl, end_line: r.el, signature: r.sig,"
+             "docstring: r.doc, code: r.code, embed_text: r.et, embedding: r.emb, content_sha: r.sha})")
+        for i in range(0, len(rows), self._BATCH):
+            self.conn.execute(q, {"rows": rows[i:i + self._BATCH]})
 
     def load_edges(self, edges) -> None:
+        """Batched per type via UNWIND — far faster than one MATCH+CREATE per edge."""
+        from collections import defaultdict
+
+        groups: dict[str, list] = defaultdict(list)
         for e in edges:
-            self._insert_edge(e)
+            groups[e.type].append(e)
+        for et, es in groups.items():
+            if et == "CALLS":
+                rows = [{"s": e.src, "d": e.dst, "c": e.confidence, "r": e.resolver} for e in es]
+                q = ("UNWIND $rows AS r MATCH (a:CodeNode {id:r.s}),(b:CodeNode {id:r.d}) "
+                     "CREATE (a)-[:CALLS {confidence:r.c, resolver:r.r}]->(b)")
+            elif et in ("INHERITS", "IMPORTS", "REFERENCES", "MAPS_TO", "QUERIES", "JOINS"):
+                rows = [{"s": e.src, "d": e.dst, "c": e.confidence} for e in es]
+                q = (f"UNWIND $rows AS r MATCH (a:CodeNode {{id:r.s}}),(b:CodeNode {{id:r.d}}) "
+                     f"CREATE (a)-[:{et} {{confidence:r.c}}]->(b)")
+            else:  # CONTAINS, DOCUMENTS
+                rows = [{"s": e.src, "d": e.dst} for e in es]
+                q = (f"UNWIND $rows AS r MATCH (a:CodeNode {{id:r.s}}),(b:CodeNode {{id:r.d}}) "
+                     f"CREATE (a)-[:{et}]->(b)")
+            for i in range(0, len(rows), self._BATCH):
+                self.conn.execute(q, {"rows": rows[i:i + self._BATCH]})
 
     def _insert_edge(self, e: Edge) -> None:
         if e.type == "CALLS":
