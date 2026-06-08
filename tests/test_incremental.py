@@ -49,6 +49,23 @@ def test_update_detects_deleted_file(tmp_path):
     assert "g" not in names
 
 
+def test_delta_recreates_only_changed_nodes(tmp_path):
+    """Row-level delta: changing one file recreates only that file's nodes; the
+    other file's nodes are preserved (not rewritten)."""
+    repo = _repo(tmp_path, {"a.py": "def af():\n    return 1\n", "b.py": "def bf():\n    return 2\n"})
+    db = tmp_path / "g.kuzu"
+    index_path(repo, db, dim=32, overwrite=True).close()
+    (repo / "b.py").write_text("def bf():\n    return 99\n")  # change only b.py
+    summary = update_index(repo, db, dim=32)
+    assert summary["status"] == "updated"
+    # only b.py (module + bf) churns — not the whole graph
+    assert summary["created"] <= 3 and summary["removed"] <= 3
+    store = Store(db)
+    names = {d["name"] for d in store.all_nodes_text()}
+    store.close()
+    assert {"af", "bf"} <= names  # a.py preserved, b.py updated
+
+
 def test_update_indexes_when_db_absent(tmp_path):
     repo = _repo(tmp_path, {"a.py": "def f():\n    return 1\n"})
     db = tmp_path / "g.kuzu"

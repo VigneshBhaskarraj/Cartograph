@@ -48,8 +48,9 @@ def update(
     summary = update_index(path, Path(db), dim=DEFAULT_DIM,
                            embedder=get_embedder(embedder) if embedder else None, resolver=resolver)
     typer.echo(f"{summary['status']}: {path} -> {db}")
-    if summary["status"] in ("updated", "indexed"):
+    if summary["status"] in ("updated", "indexed", "rebuilt"):
         typer.echo(f"  changed={len(summary['changed'])} deleted={len(summary['deleted'])} "
+                   f"| nodes {summary.get('created', 0)} recreated, {summary.get('removed', 0)} removed "
                    f"| embeddings {summary.get('embedded', 0)} computed, {summary.get('reused', 0)} reused")
     elif summary["status"] == "up-to-date":
         typer.echo("  nothing changed — no re-embed, no rebuild")

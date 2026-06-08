@@ -77,8 +77,12 @@ class Store:
 
     # -- loading --------------------------------------------------------------
     def load(self, graph: Graph, dim: int = DEFAULT_DIM) -> None:
+        self.load_nodes(graph.nodes, dim)
+        self.load_edges(graph.edges)
+
+    def load_nodes(self, nodes, dim: int = DEFAULT_DIM) -> None:
         zero = [0.0] * dim
-        for n in graph.nodes:
+        for n in nodes:
             emb = n.embedding if n.embedding is not None else zero
             self.conn.execute(
                 """
@@ -96,7 +100,9 @@ class Store:
                     "emb": emb, "sha": n.content_sha,
                 },
             )
-        for e in graph.edges:
+
+    def load_edges(self, edges) -> None:
+        for e in edges:
             self._insert_edge(e)
 
     def _insert_edge(self, e: Edge) -> None:
@@ -135,6 +141,27 @@ class Store:
             r = res.get_next()
             out[r[0]] = r[1]
         return out
+
+    # -- incremental delta ----------------------------------------------------
+    def node_shas(self) -> dict[str, str]:
+        """{node id: content_sha} for every node — drives the change diff."""
+        res = self.conn.execute("MATCH (c:CodeNode) RETURN c.id, c.content_sha")
+        out: dict[str, str] = {}
+        while res.has_next():
+            r = res.get_next()
+            out[r[0]] = r[1]
+        return out
+
+    def delete_nodes(self, ids) -> None:
+        for nid in ids:
+            self.conn.execute("MATCH (c:CodeNode {id:$id}) DETACH DELETE c", {"id": nid})
+
+    def delete_all_edges(self) -> None:
+        for et in EDGE_TYPES:
+            self.conn.execute(f"MATCH ()-[r:{et}]->() DELETE r")
+
+    def delete_meta(self, key: str) -> None:
+        self.conn.execute("MATCH (m:Meta {key:$k}) DELETE m", {"k": key})
 
     def set_embedding(self, node_id: str, vector: list[float]) -> None:
         self.conn.execute(
