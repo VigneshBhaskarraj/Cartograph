@@ -183,18 +183,53 @@ def diff_files(path: Path, db_path: Path) -> dict[str, list[str]]:
 
 
 def update_index(path: Path, db_path: Path, dim: int = DEFAULT_DIM, embedder=None,
-                 resolver: str = "heuristic") -> dict:
-    """Incremental re-index: no-op when nothing changed (instant), otherwise a
-    cache-accelerated rebuild (only changed symbols re-embed; full rebuild guarantees
-    no stale nodes/edges). Returns a summary dict."""
+                 resolver: str = "heuristic", use_cache: bool = True) -> dict:
+    """Incremental re-index. No-op when nothing changed (instant). Otherwise a
+    **row-level delta**: rebuild the graph in memory (re-parse is cheap; embeddings
+    come from the content-hash cache), then keep unchanged node rows (matched by
+    content_sha) and only delete/recreate changed ones, refreshing edges. Falls back
+    to a full rebuild if the embedder dimension changed."""
     path, db_path = Path(path), Path(db_path)
     if not db_path.exists():
         index_path(path, db_path, dim=dim, embedder=embedder, resolver=resolver).close()
-        return {"status": "indexed", "changed": sorted(_file_digests(path)), "added": [], "deleted": []}
+        return {"status": "indexed", "changed": sorted(_file_digests(path)), "added": [],
+                "deleted": [], "created": 0, "removed": 0}
     delta = diff_files(path, db_path)
     if not (delta["changed"] or delta["deleted"]):
-        return {"status": "up-to-date", **delta, "embedded": 0, "reused": 0}
-    store = index_path(path, db_path, dim=dim, embedder=embedder, overwrite=True, resolver=resolver)
-    reused, embedded = getattr(store, "cache_stats", (0, 0))
+        return {"status": "up-to-date", **delta, "embedded": 0, "reused": 0, "created": 0, "removed": 0}
+
+    embedder = embedder or get_embedder(dim=dim)
+    graph = build_graph(path, resolver=resolver)
+    cache = EmbeddingCache.for_embedder(db_path.parent / "cache", getattr(embedder, "name", "hash")) if use_cache else None
+    reused, embedded = embed_graph(graph, embedder=embedder, cache=cache)
+    if cache is not None:
+        cache.save()
+    actual_dim = len(graph.nodes[0].embedding) if graph.nodes and graph.nodes[0].embedding else dim
+
+    store = Store(db_path)
+    prev_dim = store.get_meta("embedding_dim")
+    if prev_dim is not None and int(prev_dim) != actual_dim:
+        store.close()  # vector column is fixed-size; a dim change needs a rebuild
+        index_path(path, db_path, dim=actual_dim, embedder=embedder, overwrite=True, resolver=resolver).close()
+        return {"status": "rebuilt", **delta, "embedded": embedded, "reused": reused, "created": 0, "removed": 0}
+
+    db_sha = store.node_shas()
+    keep = {n.id for n in graph.nodes if db_sha.get(n.id) == n.content_sha}
+    delete_ids = [i for i in db_sha if i not in keep]
+    create_nodes = [n for n in graph.nodes if n.id not in keep]
+    store.delete_all_edges()
+    store.delete_nodes(delete_ids)
+    store.load_nodes(create_nodes, actual_dim)
+    store.load_edges(graph.edges)
+    name = getattr(embedder, "name", "hash")
+    backend, _, model = name.partition(":")
+    store.set_meta("embedder_backend", backend)
+    store.set_meta("embedder_model", model)
+    store.set_meta("embedding_dim", str(actual_dim))
+    for rel, sha in _file_digests(path).items():
+        store.set_meta(f"file:{rel}", sha)
+    for rel in delta["deleted"]:
+        store.delete_meta(f"file:{rel}")
     store.close()
-    return {"status": "updated", **delta, "embedded": embedded, "reused": reused}
+    return {"status": "updated", **delta, "embedded": embedded, "reused": reused,
+            "created": len(create_nodes), "removed": len(delete_ids)}
