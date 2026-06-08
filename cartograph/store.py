@@ -35,7 +35,8 @@ def schema_ddl(dim: int = DEFAULT_DIM) -> list[str]:
         "CREATE REL TABLE DOCUMENTS (FROM CodeNode TO CodeNode)",
         "CREATE REL TABLE REFERENCES (FROM CodeNode TO CodeNode, confidence STRING)",  # SQL foreign key
         "CREATE REL TABLE MAPS_TO (FROM CodeNode TO CodeNode, confidence STRING)",  # ORM model -> table
-        "CREATE REL TABLE QUERIES (FROM CodeNode TO CodeNode, confidence STRING)",  # function -> table (raw SQL)
+        "CREATE REL TABLE QUERIES (FROM CodeNode TO CodeNode, confidence STRING)",  # function -> table/column
+        "CREATE REL TABLE JOINS (FROM CodeNode TO CodeNode, confidence STRING)",  # table <-> table (query JOIN)
         # Key/value metadata (e.g. which embedder produced the vectors) so readers
         # can reconstruct the matching query-time embedder. Keeps the graph the
         # single source of truth — no sidecar files.
@@ -110,7 +111,7 @@ class Store:
             q = ("MATCH (a:CodeNode {id:$s}),(b:CodeNode {id:$d}) "
                  "CREATE (a)-[:CALLS {confidence:$c, resolver:$r}]->(b)")
             self.conn.execute(q, {"s": e.src, "d": e.dst, "c": e.confidence, "r": e.resolver})
-        elif e.type in ("INHERITS", "IMPORTS", "REFERENCES", "MAPS_TO", "QUERIES"):
+        elif e.type in ("INHERITS", "IMPORTS", "REFERENCES", "MAPS_TO", "QUERIES", "JOINS"):
             q = (f"MATCH (a:CodeNode {{id:$s}}),(b:CodeNode {{id:$d}}) "
                  f"CREATE (a)-[:{e.type} {{confidence:$c}}]->(b)")
             self.conn.execute(q, {"s": e.src, "d": e.dst, "c": e.confidence})
