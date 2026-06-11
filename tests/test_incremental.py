@@ -132,3 +132,18 @@ def test_update_after_all_files_deleted_empties_graph(tmp_path):
     assert store.node_shas() == {}
     assert not any(k.startswith("file:") for k in store.all_meta())
     store.close()
+
+
+def test_update_with_nonexistent_source_path_does_not_wipe(tmp_path):
+    """Review BLOCKER: a typo'd source path must error, not masquerade as
+    'all files deleted' and silently empty the graph."""
+    import pytest
+
+    repo = _repo(tmp_path, {"a.py": "def f():\n    return 1\n"})
+    db = tmp_path / "g.kuzu"
+    index_path(repo, db, dim=32, overwrite=True).close()
+    with pytest.raises(FileNotFoundError, match="does not exist"):
+        update_index(tmp_path / "typo", db, dim=32)
+    store = Store(db)
+    assert len(store.node_shas()) > 0  # graph untouched
+    store.close()

@@ -63,8 +63,12 @@ def update(
 ) -> None:
     """Incremental re-index: instant no-op when nothing changed; otherwise a
     cache-accelerated rebuild (re-embeds only changed symbols, no stale edges)."""
-    summary = update_index(path, Path(db), dim=DEFAULT_DIM,
-                           embedder=get_embedder(embedder) if embedder else None, resolver=resolver)
+    try:
+        summary = update_index(path, Path(db), dim=DEFAULT_DIM,
+                               embedder=get_embedder(embedder) if embedder else None, resolver=resolver)
+    except (FileNotFoundError, ValueError, RuntimeError) as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
     typer.echo(f"{summary['status']}: {path} -> {db}")
     if summary["status"] in ("updated", "indexed", "rebuilt"):
         typer.echo(f"  changed={len(summary['changed'])} deleted={len(summary['deleted'])} "
@@ -91,11 +95,13 @@ def query(
     # embeds with the same model the graph was built with (no hash-vs-ollama mismatch).
     from .service import embedder_from_store
 
-    emb = get_embedder(embedder) if embedder else embedder_from_store(store)
-    retriever = Retriever(store, embedder=emb)
     try:
+        emb = get_embedder(embedder) if embedder else embedder_from_store(store)
+        retriever = Retriever(store, embedder=emb)
         hits = retriever.retrieve(text, mode=mode, k=k)
-    except RuntimeError as e:  # e.g. Ollama unreachable — message is already actionable
+    except (ValueError, RuntimeError) as e:
+        # bad --embedder name, dim mismatch, Ollama unreachable, non-loopback host —
+        # every message is already actionable; don't bury it in a traceback.
         typer.echo(str(e), err=True)
         raise typer.Exit(1)
     if not hits:
@@ -130,15 +136,18 @@ def serve(db: str = typer.Option(DEFAULT_DB, help="Kuzu DB path to serve.")) -> 
 
     Requires the optional `mcp` extra: `uv sync --extra mcp`.
     """
-    import os
-
-    os.environ.setdefault("CARTOGRAPH_DB", db)
+    # Plain assignment: an inherited CARTOGRAPH_DB must not silently override an
+    # explicit --db (the flag's default already comes from the env at startup).
+    os.environ["CARTOGRAPH_DB"] = db
     from .mcp_server import main as serve_main
 
     try:
         serve_main()
     except ModuleNotFoundError:  # pragma: no cover - mcp extra absent
         typer.echo("MCP SDK not installed. Run: uv sync --extra mcp", err=True)
+        raise typer.Exit(1)
+    except (FileNotFoundError, RuntimeError) as e:  # missing/old graph — say so cleanly
+        typer.echo(str(e), err=True)
         raise typer.Exit(1)
 
 

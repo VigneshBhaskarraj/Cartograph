@@ -120,3 +120,23 @@ def test_retriever_rejects_mismatched_embedder_dim(tmp_path):
     with pytest.raises(ValueError, match="dim"):
         Retriever(store, embedder=HashEmbedder(dim=64))
     store.close()
+
+
+def test_vector_revalidates_dim_for_lazy_embedders(tmp_path):
+    """Review: embedders whose dim is unknown until the first call (Ollama) bypass
+    the constructor check — the first query must still fail clearly, not in numpy."""
+    import pytest
+
+    class _Lazy:
+        name = "lazy"
+        dim = 128            # claims to match…
+        dim_is_exact = False  # …but is unverified, so the ctor lets it through
+
+        def embed(self, text):
+            return [0.0] * 64  # actual width is wrong
+
+    store = _store(tmp_path)  # indexed at dim=128
+    r = Retriever(store, embedder=_Lazy())
+    with pytest.raises(ValueError, match="dim"):
+        r.vector("anything")
+    store.close()

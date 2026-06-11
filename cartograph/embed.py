@@ -103,13 +103,18 @@ class OllamaEmbedder:
         try:
             with urllib.request.urlopen(req, timeout=60) as resp:
                 data = json.loads(resp.read())
+            vec = data["embedding"]
         except OSError as e:  # URLError covers refused/timeout/DNS; HTTPError covers missing model
             raise RuntimeError(
                 f"Ollama not reachable at {self.host} ({e}). Install it from https://ollama.com, "
                 f"run `ollama serve`, and `ollama pull {self.model}` — or omit the embedder "
                 "flag to use the offline default."
             ) from e
-        vec = data["embedding"]
+        except (KeyError, ValueError) as e:  # 200 with no/garbage body (ValueError covers JSON errors)
+            raise RuntimeError(
+                f"unexpected response from Ollama at {self.host} ({e!r}) — "
+                f"is {self.model!r} an embedding model?"
+            ) from e
         self.dim = len(vec)
         self.dim_is_exact = True
         return vec

@@ -66,6 +66,9 @@ This is deliberately positioned as a fix for the structural weaknesses of cloud 
   config beats vector, hybrid gets demoted rather than asserted.
 - **Symbol resolution** ships tree-sitter heuristics + opt-in Jedi receiver-type
   inference (`--resolver jedi`) instead of SCIP/stack-graphs (integration weight).
+  INHERITS edges resolve by base-class name: a *unique* corpus-wide match is tagged
+  EXTRACTED (could in principle be misled by an external class shadowed by one
+  same-named internal class); ambiguous multi-matches are honestly INFERRED.
 - **Zero egress is enforced**, not promised: a non-loopback `OLLAMA_HOST` raises
   unless `CARTOGRAPH_ALLOW_REMOTE_OLLAMA=1` is set explicitly.
 - The project license is **Apache-2.0** (patent grant for enterprise adoption);

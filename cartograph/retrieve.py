@@ -47,16 +47,18 @@ class Retriever:
             if i in self.valid:
                 self.ids.append(i)
                 self.vecs.append(v)
-        index_dim = next((len(v) for v in self.vecs if v), None)
+        self.index_dim = next((len(v) for v in self.vecs if v), None)
         if embedder is None:
-            embedder = get_embedder(dim=index_dim) if index_dim else get_embedder()
+            embedder = get_embedder(dim=self.index_dim) if self.index_dim else get_embedder()
         # An explicit embedder whose width differs from the index would crash deep
         # inside numpy at query time; fail here with the actual mismatch instead.
+        # (Embedders whose width is only known after a real call — Ollama — are
+        # re-checked per query in vector().)
         emb_dim = getattr(embedder, "dim", None)
-        if (index_dim and emb_dim and getattr(embedder, "dim_is_exact", True)
-                and emb_dim != index_dim):
+        if (self.index_dim and emb_dim and getattr(embedder, "dim_is_exact", True)
+                and emb_dim != self.index_dim):
             raise ValueError(
-                f"query embedder dim {emb_dim} != index dim {index_dim}; "
+                f"query embedder dim {emb_dim} != index dim {self.index_dim}; "
                 "drop the embedder override or re-index with this embedder")
         self.embedder = embedder
         self._build_lexical()
@@ -115,6 +117,11 @@ class Retriever:
     # -- vector ---------------------------------------------------------------
     def vector(self, query: str, k: int = 10) -> list[tuple[str, float]]:
         qv = self.embedder.embed(query)
+        if self.index_dim and len(qv) != self.index_dim:
+            raise ValueError(
+                f"query embedder dim {len(qv)} != index dim {self.index_dim} "
+                f"(embedder {getattr(self.embedder, 'name', '?')}); "
+                "drop the embedder override or re-index with this embedder")
         return _cosine_ranking(qv, self.ids, self.vecs)[:k]
 
     # -- graph (personalized PageRank) ---------------------------------------

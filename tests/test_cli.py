@@ -71,3 +71,45 @@ def test_index_skips_venv_and_vendored_dirs(tmp_path):
         (d / "junk.py").write_text("x = 1\n")
     found = _files(tmp_path, ".py")
     assert [f.name for f in found] == ["real.py"]
+
+
+def test_update_missing_source_path_is_friendly(tmp_path):
+    db = str(tmp_path / "g.kuzu")
+    r = runner.invoke(app, ["index", str(FIX), "--db", db])
+    assert r.exit_code == 0
+    r = runner.invoke(app, ["update", str(tmp_path / "typo"), "--db", db])
+    assert r.exit_code == 1
+    assert "does not exist" in r.output
+
+
+def test_query_bad_embedder_is_friendly(tmp_path):
+    db = str(tmp_path / "g.kuzu")
+    runner.invoke(app, ["index", str(FIX), "--db", db])
+    r = runner.invoke(app, ["query", "bark", "--db", db, "--embedder", "bogus"])
+    assert r.exit_code == 1
+    assert "unknown embedder" in r.output
+
+
+def test_serve_missing_db_is_friendly(tmp_path):
+    import pytest
+
+    pytest.importorskip("mcp")
+    r = runner.invoke(app, ["serve", "--db", str(tmp_path / "missing.kuzu")])
+    assert r.exit_code == 1
+    assert "no graph at" in r.output
+
+
+def test_index_venv_skipped_only_when_real_venv(tmp_path):
+    """A source package named `env` is indexed; an actual virtualenv named `env`
+    (has pyvenv.cfg) is skipped."""
+    from cartograph.pipeline import _files
+
+    pkg = tmp_path / "env"
+    pkg.mkdir()
+    (pkg / "real.py").write_text("def f():\n    pass\n")
+    venv = tmp_path / "sub" / "env"
+    venv.mkdir(parents=True)
+    (venv / "pyvenv.cfg").write_text("home = /usr\n")
+    (venv / "junk.py").write_text("x = 1\n")
+    found = [f.name for f in _files(tmp_path, ".py")]
+    assert found == ["real.py"]

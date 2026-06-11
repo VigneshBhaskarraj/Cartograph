@@ -63,14 +63,15 @@ class Store:
     @classmethod
     def create(cls, db_path: str | Path, dim: int = DEFAULT_DIM, overwrite: bool = False) -> "Store":
         p = Path(db_path)
+        # The .kuzu suffix is what later guards overwrite/delete operations from
+        # rmtree-ing a mistyped user path — enforce it at creation so a DB made
+        # today can always be replaced tomorrow.
+        if p.suffix != ".kuzu":
+            raise ValueError(
+                f"refusing to {'overwrite' if p.exists() else 'create'} {p}: "
+                "graph DB paths must end in .kuzu")
         if overwrite:
             if p.exists():
-                # Deleting whatever --db points at would let a typo rmtree a user
-                # directory; only paths that are plainly a graph DB may be replaced.
-                if p.suffix != ".kuzu":
-                    raise ValueError(
-                        f"refusing to overwrite {p}: not a .kuzu database path — "
-                        "delete it manually if that is really what you want")
                 shutil.rmtree(p) if p.is_dir() else p.unlink()
             # A stale WAL (e.g. from a killed index run) would be replayed into the
             # fresh DB — even when the main file itself is already gone.

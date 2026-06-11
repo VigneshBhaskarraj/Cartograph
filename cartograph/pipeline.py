@@ -14,9 +14,11 @@ from .store import DEFAULT_DIM, SCHEMA_VERSION, Store
 
 # Indexing a project root must not sweep up its virtualenv, vendored deps, or VCS
 # internals — embedding a .venv costs hours of Ollama time and poisons retrieval.
-SKIP_DIRS = {"__pycache__", ".git", ".hg", ".svn", ".venv", "venv", ".env", "env",
-             "node_modules", ".tox", ".nox", ".mypy_cache", ".pytest_cache", ".ruff_cache",
-             "dist", "build", ".eggs", "site-packages"}
+# (Hidden dirs are skipped wholesale; `venv`/`env` only when they really are a
+# virtualenv, so a legitimate source package named `env` still gets indexed.)
+SKIP_DIRS = {"__pycache__", "node_modules", "site-packages", ".eggs",
+             "dist", "build"}
+VENV_NAMES = {"venv", "env"}
 
 
 def _files(path: Path, suffix: str) -> list[Path]:
@@ -25,9 +27,15 @@ def _files(path: Path, suffix: str) -> list[Path]:
     out = []
     for p in path.rglob(f"*{suffix}"):
         rel_parts = p.relative_to(path).parts[:-1]  # dirs below the root only
-        if any(part in SKIP_DIRS or part.startswith(".") for part in rel_parts):
-            continue
-        out.append(p)
+        sub, skip = path, False
+        for part in rel_parts:
+            sub = sub / part
+            if (part in SKIP_DIRS or part.startswith(".")
+                    or (part in VENV_NAMES and (sub / "pyvenv.cfg").exists())):
+                skip = True
+                break
+        if not skip:
+            out.append(p)
     return sorted(out)
 
 
@@ -245,6 +253,10 @@ def update_index(path: Path, db_path: Path, dim: int = DEFAULT_DIM, embedder=Non
     to a full rebuild if the embedder (or its dimension) changed; with no explicit
     embedder it adopts the one recorded in the graph at index time."""
     path, db_path = Path(path), Path(db_path)
+    if not path.exists():
+        # A typo'd source path must not look like "every file was deleted" — the
+        # all-deleted handler below would silently wipe the whole graph.
+        raise FileNotFoundError(f"source path {path} does not exist")
     if not db_path.exists():
         index_path(path, db_path, dim=dim, embedder=embedder, resolver=resolver).close()
         return {"status": "indexed", "changed": sorted(_file_digests(path)), "added": [],

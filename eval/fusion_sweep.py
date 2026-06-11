@@ -158,13 +158,28 @@ def main() -> int:
         # Prefer the most consistent winner; break ties by mean score.
         best = max(winners, key=lambda r: (r["wins"], r["mean"][0] + r["mean"][2]))
         wv, wg, wl, rrf_k, depth = best["cfg"]
-        print(f"hybrid CAN beat vector ({len(winners)}/{len(results)} configs qualify).")
+        print(f"hybrid matches/beats vector ({len(winners)}/{len(results)} configs qualify).")
         print(f"recommended defaults: weights=({wv}, {wg}, {wl}), rrf_k={rrf_k}, depth={depth}")
         print(f"  mean r@5 {best['mean'][0]:.3f} vs vector {vec_mean[0]:.3f}; "
-              f"mrr {best['mean'][2]:.3f} vs {vec_mean[2]:.3f}; beats vector on {best['wins']}/{len(corpora)} corpora")
+              f"mrr {best['mean'][2]:.3f} vs {vec_mean[2]:.3f}; qualifies on {best['wins']}/{len(corpora)} corpora")
         for n, (r5, r10, mrr) in best["by_corpus"].items():
             v5, v10, vm = vec_by_corpus[n]
             print(f"  {n:<10} r@5 {r5:.3f} (vec {v5:.3f})  r@10 {r10:.3f} (vec {v10:.3f})  mrr {mrr:.3f} (vec {vm:.3f})")
+        # Selection happens on the same questions that score it — flag overfitting:
+        # the pick should still qualify with any single corpus held out.
+        if len(corpora) > 1:
+            loco_ok = True
+            for held in corpora:
+                rest = [n for n in corpora if n != held]
+                m5 = _mean([best["by_corpus"][n][0] for n in rest])
+                mm = _mean([best["by_corpus"][n][2] for n in rest])
+                v5 = _mean([vec_by_corpus[n][0] for n in rest])
+                vm = _mean([vec_by_corpus[n][2] for n in rest])
+                if m5 < v5 or mm < vm:
+                    loco_ok = False
+            print("  leave-one-corpus-out: " + (
+                "stable — qualifies with any corpus held out" if loco_ok else
+                "UNSTABLE — the pick depends on one corpus; add a held-out corpus before baking defaults"))
     else:
         print("NO config beats vector on mean r@5 + mrr. The honest move is to demote")
         print("hybrid to vector-primary and update SPEC.md — do not ship a fusion that")

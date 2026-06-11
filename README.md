@@ -16,8 +16,9 @@ Built as a privacy-first, correctness-first alternative to cloud GraphRAG code t
 ## Install
 Runs on macOS and Linux, Python 3.12+ — everything works offline.
 ```bash
-# as a tool (recommended for using it on your repos):
-uv tool install "cartograph[mcp] @ git+https://github.com/VigneshBhaskarraj/Cartograph"
+# as a tool (recommended for using it on your repos; sql/ts extras enable those extractors):
+uv tool install "cartograph[mcp,sql,ts] @ git+https://github.com/VigneshBhaskarraj/Cartograph"
+cartograph --help    # tool installs use plain `cartograph`, no `uv run` prefix
 
 # or for development:
 git clone https://github.com/VigneshBhaskarraj/Cartograph && cd Cartograph
