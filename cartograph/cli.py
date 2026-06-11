@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import typer
@@ -13,7 +14,20 @@ from .store import DEFAULT_DIM, Store
 
 app = typer.Typer(add_completion=False, help="Cartograph — local-first hybrid code retrieval.")
 
-DEFAULT_DB = "cartograph-out/graph.kuzu"
+DEFAULT_DB = os.environ.get("CARTOGRAPH_DB", "cartograph-out/graph.kuzu")
+QUERY_MODES = ("vector", "graph", "lexical", "hybrid")
+
+
+def _open_graph_or_exit(db: str) -> Store:
+    """Open for reading with the service's friendly failures instead of tracebacks
+    (a bare Store(db) would silently create an empty DB at a mistyped path)."""
+    from .service import open_graph
+
+    try:
+        return open_graph(db)
+    except (FileNotFoundError, RuntimeError) as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
 
 
 @app.command()
@@ -25,8 +39,12 @@ def index(
     resolver: str = typer.Option("heuristic", help="Call resolver: heuristic | jedi (needs --extra resolve)."),
 ) -> None:
     """Parse → embed → store a codebase into the graph (re-embeds only changed symbols)."""
-    store = index_path(path, Path(db), dim=DEFAULT_DIM, embedder=get_embedder(embedder),
-                       overwrite=True, use_cache=not no_cache, resolver=resolver)
+    try:
+        store = index_path(path, Path(db), dim=DEFAULT_DIM, embedder=get_embedder(embedder),
+                           overwrite=True, use_cache=not no_cache, resolver=resolver)
+    except (FileNotFoundError, ValueError, RuntimeError) as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
     counts = store.counts()
     reused, embedded = getattr(store, "cache_stats", (0, 0))
     store.close()
@@ -45,8 +63,12 @@ def update(
 ) -> None:
     """Incremental re-index: instant no-op when nothing changed; otherwise a
     cache-accelerated rebuild (re-embeds only changed symbols, no stale edges)."""
-    summary = update_index(path, Path(db), dim=DEFAULT_DIM,
-                           embedder=get_embedder(embedder) if embedder else None, resolver=resolver)
+    try:
+        summary = update_index(path, Path(db), dim=DEFAULT_DIM,
+                               embedder=get_embedder(embedder) if embedder else None, resolver=resolver)
+    except (FileNotFoundError, ValueError, RuntimeError) as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
     typer.echo(f"{summary['status']}: {path} -> {db}")
     if summary["status"] in ("updated", "indexed", "rebuilt"):
         typer.echo(f"  changed={len(summary['changed'])} deleted={len(summary['deleted'])} "
@@ -65,14 +87,23 @@ def query(
     embedder: str = typer.Option(None, help="Embedder backend: hash | ollama."),
 ) -> None:
     """Query the graph. Default mode runs the hybrid (RRF) fusion."""
-    store = Store(db)
+    if mode not in QUERY_MODES:
+        typer.echo(f"unknown mode {mode!r}; choose from: {', '.join(QUERY_MODES)}", err=True)
+        raise typer.Exit(2)
+    store = _open_graph_or_exit(db)
     # Auto-detect the embedder recorded at index time unless overridden, so the query
     # embeds with the same model the graph was built with (no hash-vs-ollama mismatch).
     from .service import embedder_from_store
 
-    emb = get_embedder(embedder) if embedder else embedder_from_store(store)
-    retriever = Retriever(store, embedder=emb)
-    hits = retriever.retrieve(text, mode=mode, k=k)
+    try:
+        emb = get_embedder(embedder) if embedder else embedder_from_store(store)
+        retriever = Retriever(store, embedder=emb)
+        hits = retriever.retrieve(text, mode=mode, k=k)
+    except (ValueError, RuntimeError) as e:
+        # bad --embedder name, dim mismatch, Ollama unreachable, non-loopback host —
+        # every message is already actionable; don't bury it in a traceback.
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
     if not hits:
         typer.echo("(no results)")
     for rank, (node_id, score) in enumerate(hits, 1):
@@ -105,9 +136,9 @@ def serve(db: str = typer.Option(DEFAULT_DB, help="Kuzu DB path to serve.")) -> 
 
     Requires the optional `mcp` extra: `uv sync --extra mcp`.
     """
-    import os
-
-    os.environ.setdefault("CARTOGRAPH_DB", db)
+    # Plain assignment: an inherited CARTOGRAPH_DB must not silently override an
+    # explicit --db (the flag's default already comes from the env at startup).
+    os.environ["CARTOGRAPH_DB"] = db
     from .mcp_server import main as serve_main
 
     try:
@@ -115,12 +146,15 @@ def serve(db: str = typer.Option(DEFAULT_DB, help="Kuzu DB path to serve.")) -> 
     except ModuleNotFoundError:  # pragma: no cover - mcp extra absent
         typer.echo("MCP SDK not installed. Run: uv sync --extra mcp", err=True)
         raise typer.Exit(1)
+    except (FileNotFoundError, RuntimeError) as e:  # missing/old graph — say so cleanly
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
 
 
 @app.command()
 def stats(db: str = typer.Option(DEFAULT_DB, help="Kuzu DB path.")) -> None:
     """Print node/edge counts for an indexed graph."""
-    store = Store(db)
+    store = _open_graph_or_exit(db)
     for kkey, v in sorted(store.counts().items()):
         typer.echo(f"{kkey}: {v}")
     store.close()

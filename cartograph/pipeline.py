@@ -9,13 +9,34 @@ from .cache import EmbeddingCache
 from .embed import get_embedder
 from .extract import extract_paths
 from .model import Graph
-from .store import DEFAULT_DIM, Store
+from .store import DEFAULT_DIM, SCHEMA_VERSION, Store
+
+
+# Indexing a project root must not sweep up its virtualenv, vendored deps, or VCS
+# internals — embedding a .venv costs hours of Ollama time and poisons retrieval.
+# (Hidden dirs are skipped wholesale; `venv`/`env` only when they really are a
+# virtualenv, so a legitimate source package named `env` still gets indexed.)
+SKIP_DIRS = {"__pycache__", "node_modules", "site-packages", ".eggs",
+             "dist", "build"}
+VENV_NAMES = {"venv", "env"}
 
 
 def _files(path: Path, suffix: str) -> list[Path]:
     if path.is_file():
         return [path] if path.suffix == suffix else []
-    return sorted(p for p in path.rglob(f"*{suffix}") if "__pycache__" not in p.parts)
+    out = []
+    for p in path.rglob(f"*{suffix}"):
+        rel_parts = p.relative_to(path).parts[:-1]  # dirs below the root only
+        sub, skip = path, False
+        for part in rel_parts:
+            sub = sub / part
+            if (part in SKIP_DIRS or part.startswith(".")
+                    or (part in VENV_NAMES and (sub / "pyvenv.cfg").exists())):
+                skip = True
+                break
+        if not skip:
+            out.append(p)
+    return sorted(out)
 
 
 def _file_digests(path: Path) -> dict[str, str]:
@@ -71,13 +92,24 @@ def _extract_embedded_sql(graph: Graph) -> None:
     new_nodes, contains, pending_fks, pending_queries, pending_joins, pending_cols = extract_embedded_sql(units)
 
     by_qual = {n.qualified_name: n for n in graph.nodes if n.kind == "table"}
+    col_quals = {n.qualified_name for n in graph.nodes if n.kind == "column"}
     by_id = {n.id for n in graph.nodes}
-    for n in new_nodes:  # dedup tables/cols already present (e.g. also in a .sql file)
-        if n.id not in by_id and n.qualified_name not in (by_qual if n.kind == "table" else {}):
-            graph.nodes.append(n)
-            by_id.add(n.id)
-            if n.kind == "table":
-                by_qual[n.qualified_name] = n
+    # Dedup tables AND columns by qualified name: the same CREATE TABLE appearing in
+    # a .sql file and embedded in Python must not mint orphan duplicate column nodes
+    # (they pollute candidates and double-count in eval gold sets).
+    for n in new_nodes:
+        if n.id in by_id:
+            continue
+        if n.kind == "table" and n.qualified_name in by_qual:
+            continue
+        if n.kind == "column" and n.qualified_name in col_quals:
+            continue
+        graph.nodes.append(n)
+        by_id.add(n.id)
+        if n.kind == "table":
+            by_qual[n.qualified_name] = n
+        elif n.kind == "column":
+            col_quals.add(n.qualified_name)
     valid = by_id
     seen = {(e.type, e.src, e.dst) for e in graph.edges}
     for e in contains:
@@ -143,6 +175,8 @@ def embed_graph(graph: Graph, embedder=None, cache: EmbeddingCache | None = None
     """Embed every node, reusing `cache` for unchanged embed_text. Returns (reused, embedded)."""
     embedder = embedder or get_embedder()
     dim = getattr(embedder, "dim", None)
+    if not getattr(embedder, "dim_is_exact", True):
+        dim = None  # unconfirmed width (Ollama before its first call) must not void cache hits
     pending_idx, pending_text = [], []
     reused = 0
     for i, n in enumerate(graph.nodes):
@@ -190,6 +224,7 @@ def index_path(path: Path, db_path: Path, dim: int = DEFAULT_DIM, embedder=None,
     store.set_meta("embedder_backend", backend)
     store.set_meta("embedder_model", model)
     store.set_meta("embedding_dim", str(actual_dim))
+    store.set_meta("schema_version", SCHEMA_VERSION)
     # Per-file content hashes, so `update` can detect what changed without re-embedding.
     for rel, sha in _file_digests(path).items():
         store.set_meta(f"file:{rel}", sha)
@@ -215,8 +250,13 @@ def update_index(path: Path, db_path: Path, dim: int = DEFAULT_DIM, embedder=Non
     **row-level delta**: rebuild the graph in memory (re-parse is cheap; embeddings
     come from the content-hash cache), then keep unchanged node rows (matched by
     content_sha) and only delete/recreate changed ones, refreshing edges. Falls back
-    to a full rebuild if the embedder dimension changed."""
+    to a full rebuild if the embedder (or its dimension) changed; with no explicit
+    embedder it adopts the one recorded in the graph at index time."""
     path, db_path = Path(path), Path(db_path)
+    if not path.exists():
+        # A typo'd source path must not look like "every file was deleted" — the
+        # all-deleted handler below would silently wipe the whole graph.
+        raise FileNotFoundError(f"source path {path} does not exist")
     if not db_path.exists():
         index_path(path, db_path, dim=dim, embedder=embedder, resolver=resolver).close()
         return {"status": "indexed", "changed": sorted(_file_digests(path)), "added": [],
@@ -225,20 +265,50 @@ def update_index(path: Path, db_path: Path, dim: int = DEFAULT_DIM, embedder=Non
     if not (delta["changed"] or delta["deleted"]):
         return {"status": "up-to-date", **delta, "embedded": 0, "reused": 0, "created": 0, "removed": 0}
 
+    meta_store = Store(db_path)
+    prev_dim = meta_store.get_meta("embedding_dim")
+    prev_backend = meta_store.get_meta("embedder_backend")
+    prev_model = meta_store.get_meta("embedder_model") or ""
+    meta_store.close()
+    if embedder is None and prev_backend:
+        # A plain `update` must keep the index's embedder: defaulting to hash on an
+        # ollama-built graph would mix vector spaces (both 768-dim — nothing errors).
+        try:
+            embedder = get_embedder(prev_backend, dim=int(prev_dim) if prev_dim else dim,
+                                    model=prev_model or None)
+        except ValueError:
+            pass  # unknown recorded backend (hand-built store) — use the default
     embedder = embedder or get_embedder(dim=dim)
-    graph = build_graph(path, resolver=resolver)
+    try:
+        graph = build_graph(path, resolver=resolver)
+    except FileNotFoundError:
+        # Every source file is gone: the correct delta is "delete everything",
+        # not a crash that leaves the stale graph serving answers.
+        store = Store(db_path)
+        removed = len(store.node_shas())
+        store.delete_all_edges()
+        store.conn.execute("MATCH (c:CodeNode) DETACH DELETE c")
+        for rel in delta["deleted"]:
+            store.delete_meta(f"file:{rel}")
+        store.close()
+        return {"status": "updated", **delta, "embedded": 0, "reused": 0,
+                "created": 0, "removed": removed}
     cache = EmbeddingCache.for_embedder(db_path.parent / "cache", getattr(embedder, "name", "hash")) if use_cache else None
     reused, embedded = embed_graph(graph, embedder=embedder, cache=cache)
     if cache is not None:
         cache.save()
     actual_dim = len(graph.nodes[0].embedding) if graph.nodes and graph.nodes[0].embedding else dim
 
-    store = Store(db_path)
-    prev_dim = store.get_meta("embedding_dim")
-    if prev_dim is not None and int(prev_dim) != actual_dim:
-        store.close()  # vector column is fixed-size; a dim change needs a rebuild
+    name = getattr(embedder, "name", "hash")
+    backend, _, model = name.partition(":")
+    # A dim change can't share the fixed-size vector column; an *explicit* embedder
+    # change must not keep old vectors on unchanged rows — either way, full rebuild.
+    if (prev_dim is not None and int(prev_dim) != actual_dim) or (
+            prev_backend is not None and (prev_backend, prev_model) != (backend, model)):
         index_path(path, db_path, dim=actual_dim, embedder=embedder, overwrite=True, resolver=resolver).close()
         return {"status": "rebuilt", **delta, "embedded": embedded, "reused": reused, "created": 0, "removed": 0}
+
+    store = Store(db_path)
 
     db_sha = store.node_shas()
     keep = {n.id for n in graph.nodes if db_sha.get(n.id) == n.content_sha}
@@ -253,6 +323,7 @@ def update_index(path: Path, db_path: Path, dim: int = DEFAULT_DIM, embedder=Non
     store.set_meta("embedder_backend", backend)
     store.set_meta("embedder_model", model)
     store.set_meta("embedding_dim", str(actual_dim))
+    store.set_meta("schema_version", SCHEMA_VERSION)
     for rel, sha in _file_digests(path).items():
         store.set_meta(f"file:{rel}", sha)
     for rel in delta["deleted"]:

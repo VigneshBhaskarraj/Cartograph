@@ -12,8 +12,31 @@ import os
 from pathlib import Path
 
 from .embed import get_embedder
+from .model import EDGE_TYPES
 from .retrieve import Retriever
-from .store import DEFAULT_DIM, Store
+from .store import DEFAULT_DIM, SCHEMA_VERSION, Store
+
+REQUIRED_TABLES = {"CodeNode", *EDGE_TYPES}
+
+
+def open_graph(db_path: str | Path, read_only: bool = True) -> Store:
+    """Open an existing graph with friendly failures: a missing path must not
+    silently create an empty DB, and a graph built by an older/newer Cartograph
+    (missing rel tables, other schema_version) must say so, not crash mid-query."""
+    p = Path(db_path)
+    if not p.exists():
+        raise FileNotFoundError(f"no graph at {p}; run `cartograph index <path> --db {p}` first")
+    store = Store(p, read_only=read_only)
+    missing = REQUIRED_TABLES - store.table_names()
+    version = store.get_meta("schema_version") if not missing else None
+    if missing or (version is not None and version != SCHEMA_VERSION):
+        store.close()
+        why = (f"missing tables: {', '.join(sorted(missing))}" if missing
+               else f"schema_version {version} != {SCHEMA_VERSION}")
+        raise RuntimeError(
+            f"graph at {p} was built by an incompatible Cartograph ({why}); "
+            "re-run `cartograph index`")
+    return store
 
 
 def embedder_from_store(store: Store):
@@ -31,9 +54,10 @@ class CartographService:
     """Opens a graph once and answers structural/semantic queries."""
 
     def __init__(self, db_path: str | Path, embedder=None, reranker=None):
-        if not Path(db_path).exists():
-            raise FileNotFoundError(f"no graph at {db_path}; run `cartograph index` first")
-        self.store = Store(db_path)
+        # Read-only: queries never write, accidental writes become errors, and
+        # several read-only servers can share one graph. (It does NOT allow a
+        # concurrent writer — Kuzu is multi-reader OR single-writer; see docs/mcp.md.)
+        self.store = open_graph(db_path, read_only=True)
         if embedder is None:
             embedder = embedder_from_store(self.store)
         # Build a reranker from env (CARTOGRAPH_RERANKER=ollama, CARTOGRAPH_RERANK_MODEL=...)
@@ -74,6 +98,7 @@ class CartographService:
         """Hybrid (default) retrieval; returns ranked nodes with scores."""
         if mode not in self.modes:
             raise ValueError(f"mode must be one of {sorted(self.modes)}")
+        k = max(1, min(int(k), 100))  # k<=0 would slice wrong; huge k is an agent typo
         hits = self.retriever.retrieve(text, mode=mode, k=k)
         return [n for n in (self._node(i, s) for i, s in hits) if n]
 

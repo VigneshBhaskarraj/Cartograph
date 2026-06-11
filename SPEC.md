@@ -53,3 +53,23 @@ This is deliberately positioned as a fix for the structural weaknesses of cloud 
 - Is the Kuzu DB committed to git (team-map convenience) or regenerated per checkout?
 - Node/edge schema: one node table with a `kind` property, or separate tables per kind?
 - Reranker model choice and whether it's worth the latency for the MVP.
+
+## 8. As-built deviations from §3 (kept honest, per CLAUDE.md)
+- **Vector search** is exact brute-force NumPy cosine, not Kuzu HNSW: the HNSW
+  extension is a network download, which breaks offline-by-default. Identical recall;
+  HNSW remains the speed-only upgrade path. **Keyword search** is a hand-rolled BM25
+  over a code-aware tokenizer, not Kuzu FTS, for the same reason.
+- **Fusion** is *weighted* RRF (`cartograph/retrieve.py`). The Gate-1 scorecard showed
+  equal-weight RRF letting two low-precision signals (graph, lexical) outvote the
+  high-precision vector signal — hybrid lost to vector-alone on every aggregate
+  metric. Weights/rrf_k are tuned only via `eval/fusion_sweep.py` evidence; if no
+  config beats vector, hybrid gets demoted rather than asserted.
+- **Symbol resolution** ships tree-sitter heuristics + opt-in Jedi receiver-type
+  inference (`--resolver jedi`) instead of SCIP/stack-graphs (integration weight).
+  INHERITS edges resolve by base-class name: a *unique* corpus-wide match is tagged
+  EXTRACTED (could in principle be misled by an external class shadowed by one
+  same-named internal class); ambiguous multi-matches are honestly INFERRED.
+- **Zero egress is enforced**, not promised: a non-loopback `OLLAMA_HOST` raises
+  unless `CARTOGRAPH_ALLOW_REMOTE_OLLAMA=1` is set explicitly.
+- The project license is **Apache-2.0** (patent grant for enterprise adoption);
+  dependencies remain MIT-compatible per §5 (Kuzu itself is MIT).

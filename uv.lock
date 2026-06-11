@@ -75,7 +75,7 @@ ts = [
 [package.metadata]
 requires-dist = [
     { name = "jedi", marker = "extra == 'resolve'", specifier = ">=0.19" },
-    { name = "kuzu", specifier = ">=0.6" },
+    { name = "kuzu", specifier = ">=0.11,<0.12" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.2" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },

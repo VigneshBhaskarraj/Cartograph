@@ -6,33 +6,65 @@ Built as a privacy-first, correctness-first alternative to cloud GraphRAG code t
 
 > **Status:** early development. See [`SPEC.md`](./SPEC.md) for the design and [`docs/eval-set-httpx.md`](./docs/eval-set-httpx.md) for the evaluation methodology.
 
-## How it works (planned)
-- **tree-sitter** extracts code structure locally (free); SQL schemas are parsed deterministically — app code and DB schema land in one graph.
-- **Kuzu** stores it all: a property graph + HNSW vector index + full-text search in a single embedded file.
-- **Hybrid retrieval** fuses vector similarity, graph traversal, and keyword search, then reranks.
-- A **local embedding model** and an optional **local LLM** mean zero network calls by default.
+## How it works
+- **tree-sitter** extracts code structure locally (Python + TypeScript); SQL schemas are parsed deterministically — app code and DB schema land in one graph.
+- **Kuzu** stores it all: a property graph in a single embedded file. (Vector search is currently exact brute-force cosine — deliberate, fully offline; Kuzu HNSW is the planned speed-only upgrade.)
+- **Hybrid retrieval** fuses vector similarity, graph traversal (personalized PageRank), and BM25 keyword search with weighted RRF, plus an opt-in local-LLM reranker.
+- A **local embedding model** (Ollama) and an optional **local LLM** mean zero network calls by default — enforced, not promised: a non-loopback `OLLAMA_HOST` is refused unless explicitly allowed.
 - The graph is exposed over **MCP**, so any coding agent can query structure-aware context on demand.
+
+## Install
+Runs on macOS and Linux, Python 3.12+ — everything works offline.
+```bash
+# as a tool (recommended for using it on your repos; sql/ts extras enable those extractors):
+uv tool install "cartograph[mcp,sql,ts] @ git+https://github.com/VigneshBhaskarraj/Cartograph"
+cartograph --help    # tool installs use plain `cartograph`, no `uv run` prefix
+
+# or for development:
+git clone https://github.com/VigneshBhaskarraj/Cartograph && cd Cartograph
+uv sync --all-extras
+uv run pytest        # the whole suite runs offline and deterministically
+```
 
 ## Quickstart
 ```bash
-uv sync --extra dev                         # install (Python 3.12)
-uv run pytest                               # 17 tests, fully offline
-
-# Index any Python file or package, then query the graph
+# Index any Python/TypeScript/SQL file or package, then query the graph
 uv run cartograph index path/to/pkg --db cartograph-out/graph.kuzu
 uv run cartograph query "what calls encode_request" --mode hybrid --k 8
 ```
-Modes: `vector`, `graph`, `lexical`, `hybrid` (RRF fusion). The default embedder is an
-offline feature-hash model — set `CARTOGRAPH_EMBEDDER=ollama` for real local semantic
-embeddings (still zero egress; only talks to `127.0.0.1`).
+Modes: `vector`, `graph`, `lexical`, `hybrid` (weighted RRF fusion). The default embedder
+is an offline feature-hash model — set `CARTOGRAPH_EMBEDDER=ollama` for real local
+semantic embeddings (still zero egress; only talks to `127.0.0.1`).
 
 ### Use it from Claude Code (MCP)
 ```bash
 uv sync --extra mcp
 uv run cartograph serve --db cartograph-out/graph.kuzu     # stdio MCP server
 ```
-Exposes `query` / `semantic_search` / `get_node` / `neighbors` / `shortest_path` so an
-agent queries structure instead of grepping. Wiring + tool reference: [`docs/mcp.md`](./docs/mcp.md).
+Or in your project's `.mcp.json` (use **absolute** paths — the server resolves `--db`
+relative to its working directory):
+```json
+{
+  "mcpServers": {
+    "cartograph": {
+      "command": "uv",
+      "args": ["run", "--directory", "/abs/path/to/Cartograph",
+               "cartograph", "serve", "--db", "/abs/path/to/Cartograph/cartograph-out/graph.kuzu"]
+    }
+  }
+}
+```
+Exposes `query` / `semantic_search` / `get_node` / `neighbors` / `calls` / `callers` /
+`shortest_path` so an agent queries structure instead of grepping. Wiring + tool
+reference: [`docs/mcp.md`](./docs/mcp.md).
+
+### Measure it
+Retrieval quality is measured, never asserted (see `CLAUDE.md`). The one-command
+dashboard indexes four corpora and scores every retriever:
+```bash
+bash eval/get_corpus.sh 0.27.2 && bash eval/get_flask.sh && bash eval/get_aidigest.sh
+uv run python eval/scorecard.py                 # offline; --embedder ollama for real numbers
+```
 
 ## Status / roadmap
 - [x] M0 — vertical slice (extract → store → embed → query, one Python file → httpx)

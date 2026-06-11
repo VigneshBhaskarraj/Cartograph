@@ -47,9 +47,19 @@ class Retriever:
             if i in self.valid:
                 self.ids.append(i)
                 self.vecs.append(v)
+        self.index_dim = next((len(v) for v in self.vecs if v), None)
         if embedder is None:
-            dim = next((len(v) for v in self.vecs if v), None)
-            embedder = get_embedder(dim=dim) if dim else get_embedder()
+            embedder = get_embedder(dim=self.index_dim) if self.index_dim else get_embedder()
+        # An explicit embedder whose width differs from the index would crash deep
+        # inside numpy at query time; fail here with the actual mismatch instead.
+        # (Embedders whose width is only known after a real call — Ollama — are
+        # re-checked per query in vector().)
+        emb_dim = getattr(embedder, "dim", None)
+        if (self.index_dim and emb_dim and getattr(embedder, "dim_is_exact", True)
+                and emb_dim != self.index_dim):
+            raise ValueError(
+                f"query embedder dim {emb_dim} != index dim {self.index_dim}; "
+                "drop the embedder override or re-index with this embedder")
         self.embedder = embedder
         self._build_lexical()
         self._build_adjacency()
@@ -107,6 +117,11 @@ class Retriever:
     # -- vector ---------------------------------------------------------------
     def vector(self, query: str, k: int = 10) -> list[tuple[str, float]]:
         qv = self.embedder.embed(query)
+        if self.index_dim and len(qv) != self.index_dim:
+            raise ValueError(
+                f"query embedder dim {len(qv)} != index dim {self.index_dim} "
+                f"(embedder {getattr(self.embedder, 'name', '?')}); "
+                "drop the embedder override or re-index with this embedder")
         return _cosine_ranking(qv, self.ids, self.vecs)[:k]
 
     # -- graph (personalized PageRank) ---------------------------------------
@@ -147,13 +162,22 @@ class Retriever:
         return [(ids[i], float(r[i])) for i in order[:k] if r[i] > 0]
 
     # -- fusion ---------------------------------------------------------------
-    def hybrid(self, query: str, k: int = 10, rrf_k: int = 60) -> list[tuple[str, float]]:
+    def hybrid(self, query: str, k: int = 10, rrf_k: int = 60,
+               weights: tuple[float, float, float] | None = None,
+               depth: int = 20) -> list[tuple[str, float]]:
+        """Weighted RRF over (vector, graph, lexical) rankings of length `depth`.
+
+        Equal weights with a large rrf_k let two weak signals outvote a strong one
+        (measured on the Gate-1 scorecard: hybrid < vector). Weights and rrf_k are
+        therefore tunable; defaults change only via eval/fusion_sweep.py evidence.
+        """
+        d = max(k, depth)
         rankings = [
-            [i for i, _ in self.vector(query, k=max(k, 20))],
-            [i for i, _ in self.graph(query, k=max(k, 20))],
-            [i for i, _ in self.lexical(query, k=max(k, 20))],
+            [i for i, _ in self.vector(query, k=d)],
+            [i for i, _ in self.graph(query, k=d)],
+            [i for i, _ in self.lexical(query, k=d)],
         ]
-        return rrf_fuse(rankings, k=k, rrf_k=rrf_k)
+        return rrf_fuse(rankings, k=k, rrf_k=rrf_k, weights=weights)
 
     # -- rerank (second stage) ------------------------------------------------
     def reranked(self, query: str, k: int = 10, pool: int = 20, rrf_k: int = 60) -> list[tuple[str, float]]:
@@ -180,11 +204,22 @@ class Retriever:
         }[mode](query, k=k)
 
 
-def rrf_fuse(rankings: list[list[str]], k: int = 10, rrf_k: int = 60) -> list[tuple[str, float]]:
-    """Reciprocal Rank Fusion: score = Σ 1/(rrf_k + rank)."""
+def rrf_fuse(rankings: list[list[str]], k: int = 10, rrf_k: int = 60,
+             weights: list[float] | None = None) -> list[tuple[str, float]]:
+    """Reciprocal Rank Fusion: score = Σ w_i / (rrf_k + rank).
+
+    `weights` (one per ranking, default all 1.0) lets a high-precision signal
+    outvote low-precision ones instead of being averaged down by them.
+    """
+    if weights is None:
+        weights = [1.0] * len(rankings)
+    if len(weights) != len(rankings):
+        raise ValueError(f"got {len(weights)} weights for {len(rankings)} rankings")
     scores: dict[str, float] = defaultdict(float)
-    for ranking in rankings:
+    for w, ranking in zip(weights, rankings):
+        if w == 0:
+            continue
         for rank, node_id in enumerate(ranking):
-            scores[node_id] += 1.0 / (rrf_k + rank + 1)
+            scores[node_id] += w / (rrf_k + rank + 1)
     fused = sorted(scores.items(), key=lambda x: -x[1])
     return fused[:k]

@@ -34,3 +34,17 @@ def test_typescript_queryable_via_service(tmp_path):
     hits = svc.calls("Dog.speak")
     assert any(h["name"] == "bark" for h in hits)
     svc.close()
+
+
+def test_import_binds_to_exact_module_not_suffix(tmp_path):
+    """Audit H3: './utils' must resolve to `utils`, never to a module that merely
+    ends with the same substring (`statsutils`)."""
+    (tmp_path / "utils.ts").write_text("export function helper(): number { return 1; }\n")
+    (tmp_path / "statsutils.ts").write_text("export function other(): number { return 2; }\n")
+    (tmp_path / "main.ts").write_text("import { helper } from './utils';\nhelper();\n")
+    g = build_graph(tmp_path)
+    by_id = {n.id: n for n in g.nodes}
+    targets = {by_id[e.dst].qualified_name for e in g.edges
+               if e.type == "IMPORTS" and by_id[e.src].name == "main"}
+    assert any(t.endswith(".utils") or t == "utils" for t in targets)
+    assert not any("statsutils" in t for t in targets)

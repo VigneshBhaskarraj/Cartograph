@@ -15,6 +15,10 @@ import kuzu
 from .model import EDGE_TYPES, Edge, Graph, Node
 
 DEFAULT_DIM = 768
+# Bump when the graph layout changes incompatibly (new required tables/columns);
+# readers compare it (and the table set) to fail with "re-run cartograph index"
+# instead of a mid-query crash.
+SCHEMA_VERSION = "1"
 
 
 def schema_ddl(dim: int = DEFAULT_DIM) -> list[str]:
@@ -45,11 +49,11 @@ def schema_ddl(dim: int = DEFAULT_DIM) -> list[str]:
 
 
 class Store:
-    def __init__(self, db_path: str | Path):
+    def __init__(self, db_path: str | Path, read_only: bool = False):
         self.path = Path(db_path)
         if self.path.parent and not self.path.parent.exists():
             self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.db = kuzu.Database(str(self.path))
+        self.db = kuzu.Database(str(self.path), read_only=read_only)
         self.conn = kuzu.Connection(self.db)
 
     def close(self) -> None:
@@ -59,8 +63,21 @@ class Store:
     @classmethod
     def create(cls, db_path: str | Path, dim: int = DEFAULT_DIM, overwrite: bool = False) -> "Store":
         p = Path(db_path)
-        if overwrite and p.exists():
-            shutil.rmtree(p) if p.is_dir() else p.unlink()
+        # The .kuzu suffix is what later guards overwrite/delete operations from
+        # rmtree-ing a mistyped user path — enforce it at creation so a DB made
+        # today can always be replaced tomorrow.
+        if p.suffix != ".kuzu":
+            raise ValueError(
+                f"refusing to {'overwrite' if p.exists() else 'create'} {p}: "
+                "graph DB paths must end in .kuzu")
+        if overwrite:
+            if p.exists():
+                shutil.rmtree(p) if p.is_dir() else p.unlink()
+            # A stale WAL (e.g. from a killed index run) would be replayed into the
+            # fresh DB — even when the main file itself is already gone.
+            wal = p.with_name(p.name + ".wal")
+            if wal.exists():
+                wal.unlink()
         store = cls(p)
         store.create_schema(dim)
         return store

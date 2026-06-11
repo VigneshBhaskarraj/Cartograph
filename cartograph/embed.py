@@ -22,12 +22,23 @@ import urllib.request
 
 from .store import DEFAULT_DIM
 
-def _warn_if_remote(host: str) -> None:
-    """Guard the zero-egress promise: warn if Ollama isn't on loopback."""
-    if not any(h in host for h in ("127.0.0.1", "localhost", "0.0.0.0", "::1")):
+def _check_loopback(host: str) -> None:
+    """Enforce the zero-egress promise: refuse a non-loopback Ollama host unless
+    explicitly allowed (CARTOGRAPH_ALLOW_REMOTE_OLLAMA=1). Exact hostname compare —
+    a substring check would pass lookalikes such as localhost.evil.com."""
+    from urllib.parse import urlsplit
+    target = host if "://" in host else f"//{host}"
+    hostname = (urlsplit(target).hostname or "").lower()
+    if hostname in ("127.0.0.1", "localhost", "0.0.0.0", "::1"):
+        return
+    if os.environ.get("CARTOGRAPH_ALLOW_REMOTE_OLLAMA") == "1":
         import warnings
         warnings.warn(f"OLLAMA_HOST={host} is not loopback — code/queries leave this machine.",
                       stacklevel=3)
+        return
+    raise RuntimeError(
+        f"OLLAMA_HOST={host} is not loopback; sending code there breaks the zero-egress "
+        "default. Set CARTOGRAPH_ALLOW_REMOTE_OLLAMA=1 to allow it explicitly.")
 
 
 _TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9]*")
@@ -49,6 +60,7 @@ class HashEmbedder:
     """Feature-hashing embedder: deterministic, offline, dependency-free."""
 
     name = "hash"
+    dim_is_exact = True  # output width always equals the declared dim
 
     def __init__(self, dim: int = DEFAULT_DIM):
         self.dim = dim
@@ -77,17 +89,35 @@ class OllamaEmbedder:
         self.name = f"ollama:{model}"
         self.model = model
         self.host = (host or os.environ.get("OLLAMA_HOST") or "http://127.0.0.1:11434").rstrip("/")
-        _warn_if_remote(self.host)
+        _check_loopback(self.host)
         self.dim = dim
+        # The model decides the true width (nomic 768, mxbai 1024, …); until the
+        # first call confirms it, `dim` is a guess and must not gate cache hits.
+        self.dim_is_exact = False
 
     def embed(self, text: str) -> list[float]:
         payload = json.dumps({"model": self.model, "prompt": text}).encode()
         req = urllib.request.Request(
             f"{self.host}/api/embeddings", data=payload, headers={"Content-Type": "application/json"}
         )
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            data = json.loads(resp.read())
-        return data["embedding"]
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                data = json.loads(resp.read())
+            vec = data["embedding"]
+        except OSError as e:  # URLError covers refused/timeout/DNS; HTTPError covers missing model
+            raise RuntimeError(
+                f"Ollama not reachable at {self.host} ({e}). Install it from https://ollama.com, "
+                f"run `ollama serve`, and `ollama pull {self.model}` — or omit the embedder "
+                "flag to use the offline default."
+            ) from e
+        except (KeyError, ValueError) as e:  # 200 with no/garbage body (ValueError covers JSON errors)
+            raise RuntimeError(
+                f"unexpected response from Ollama at {self.host} ({e!r}) — "
+                f"is {self.model!r} an embedding model?"
+            ) from e
+        self.dim = len(vec)
+        self.dim_is_exact = True
+        return vec
 
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
         return [self.embed(t) for t in texts]
