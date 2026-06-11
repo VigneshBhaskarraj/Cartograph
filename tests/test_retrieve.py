@@ -69,3 +69,41 @@ def test_rrf_fuse_basic():
     b = ["y", "x", "w"]
     fused = [i for i, _ in rrf_fuse([a, b], k=4)]
     assert fused[0] in ("x", "y")  # items high in both rise to the top
+
+
+def test_rrf_fuse_weighted_signal_wins():
+    """A heavily-weighted signal's top hit survives two signals that agree against it."""
+    strong = ["a", "b", "c"]
+    weak1 = ["z", "y", "x"]
+    weak2 = ["z", "y", "x"]
+    rankings = [strong, weak1, weak2]
+    equal = [i for i, _ in rrf_fuse(rankings, k=3, rrf_k=60)]
+    assert equal[0] == "z"  # equal weights: the two weak signals outvote the strong one
+    weighted = [i for i, _ in rrf_fuse(rankings, k=3, rrf_k=60, weights=[3.0, 1.0, 1.0])]
+    assert weighted[0] == "a"
+
+
+def test_rrf_fuse_default_weights_match_unweighted():
+    a, b = ["x", "y", "z"], ["y", "x", "w"]
+    assert rrf_fuse([a, b], k=4) == rrf_fuse([a, b], k=4, weights=[1.0, 1.0])
+
+
+def test_rrf_fuse_zero_weight_drops_signal():
+    a, b = ["x", "y"], ["z", "w"]
+    fused = [i for i, _ in rrf_fuse([a, b], k=4, weights=[1.0, 0.0])]
+    assert fused == ["x", "y"]
+
+
+def test_rrf_fuse_weight_count_mismatch():
+    import pytest
+
+    with pytest.raises(ValueError):
+        rrf_fuse([["x"], ["y"]], weights=[1.0])
+
+
+def test_hybrid_accepts_weights(tmp_path):
+    store = _store(tmp_path)
+    r = Retriever(store)
+    hits = r.hybrid("bark sound", k=5, rrf_k=20, weights=(2.0, 0.5, 1.0), depth=50)
+    assert hits and all(isinstance(i, str) and isinstance(s, float) for i, s in hits)
+    store.close()

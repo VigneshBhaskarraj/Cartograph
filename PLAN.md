@@ -222,6 +222,35 @@ precision gap); the **reranker is deferred to M2** and not part of this plan.
 
 ---
 
+## Gate-2.5 — Fusion fix (added 2026-06-11)
+The 2026-06-07 ollama scorecard showed vector-alone beating equal-weight hybrid on
+every aggregate metric — fusion was diluting the strongest signal. Plan approved in
+session; decision rule: hybrid must match/beat vector on mean recall@5 AND mrr, or
+be demoted honestly.
+
+### G2.5-1 — Weighted RRF
+- **Files:** `cartograph/retrieve.py`, `tests/test_retrieve.py`
+- **Does:** `rrf_fuse(..., weights=)` + `hybrid(..., weights=, rrf_k=, depth=)`;
+  defaults unchanged (equal weights) until sweep evidence picks new ones.
+- **Verify:** `uv run pytest tests/test_retrieve.py -q`
+
+### G2.5-2 — Fusion sweep harness
+- **Files:** `eval/fusion_sweep.py`
+- **Does:** caches each signal's depth-50 ranking once per question, re-fuses across
+  a 128-config grid (weights × rrf_k × depth), prints leaderboard + verdict vs the
+  vector baseline, per-corpus consistency, optional CSV.
+- **Verify:** `uv run python eval/fusion_sweep.py --embedder hash` (runs all present
+  corpora end-to-end; mechanism check only — real numbers need `--embedder ollama`)
+
+### G2.5-3 — Bake the winner (blocked on an ollama sweep run)
+- **Files:** `cartograph/retrieve.py` (hybrid defaults), `SPEC.md` note
+- **Does:** set hybrid's default weights/rrf_k/depth to the ollama sweep winner, or
+  demote hybrid if no config qualifies.
+- **Verify:** `uv run python eval/scorecard.py --embedder ollama --reindex` shows
+  hybrid ≥ vector on mean recall@5 and mrr.
+
+---
+
 ## Implementation notes — deviations from this plan (M0/M1 as shipped)
 Recorded so the drift from the approved plan is explicit (not silent):
 1. **Node `id` format** is `<file>::<qualified_name>#<line>`, not `<file>::<qualified_name>`.
