@@ -26,3 +26,16 @@ def test_load_roundtrip(tmp_path):
     assert counts.get("node:function", 0) == 1
     assert counts.get("edge:CONTAINS", 0) >= 1
     store.close()
+
+
+def test_create_overwrite_clears_stale_wal_without_main_file(tmp_path):
+    """Audit L1: a WAL left by a killed index run (main file gone) must not be
+    replayed into the fresh DB — that bricked every subsequent index."""
+    db = tmp_path / "g.kuzu"
+    wal = tmp_path / "g.kuzu.wal"
+    wal.write_bytes(b"stale write-ahead log garbage")
+    store = Store.create(db, dim=16, overwrite=True)  # must not replay the stale WAL
+    assert "CodeNode" in store.table_names()
+    store.close()
+    if wal.exists():  # kuzu may write its own fresh WAL; the garbage must be gone
+        assert b"stale write-ahead log garbage" not in wal.read_bytes()

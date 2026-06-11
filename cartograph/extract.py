@@ -170,12 +170,15 @@ class _FileExtractor:
             content_sha=_sha(_text(self.src, root)),
         )
         self.nodes.append(module_node)
-        self._walk(root, parent_id=module_node.id, class_qual=None)
+        self._walk(root, parent_id=module_node.id, enclosing_qual=self.module, in_class=False)
         self._collect_sql(root, module_node.id)  # top-level SQL (skips def bodies)
         if self.sql_strings:
             module_node.extra["sql"] = [(oid, self.rel_path, txt) for oid, txt in self.sql_strings]
 
-    def _walk(self, node: TSNode, parent_id: str, class_qual: str | None) -> None:
+    def _walk(self, node: TSNode, parent_id: str, enclosing_qual: str, in_class: bool) -> None:
+        """`enclosing_qual` is the qualified name of the lexical parent scope
+        (module, class, or function); `in_class` is true only when the *direct*
+        parent scope is a class body — that's what makes a def a method."""
         for child in node.children:
             t = child.type
             if t == "comment":
@@ -186,20 +189,20 @@ class _FileExtractor:
             elif t == "import_from_statement":
                 self._handle_import_from(child)
             elif t == "decorated_definition":
-                self._walk(child, parent_id, class_qual)
+                self._walk(child, parent_id, enclosing_qual, in_class)
             elif t == "class_definition":
-                self._handle_class(child, parent_id)
+                self._handle_class(child, parent_id, enclosing_qual)
             elif t == "function_definition":
-                self._handle_function(child, parent_id, class_qual)
+                self._handle_function(child, parent_id, enclosing_qual, in_class)
             else:
-                self._walk(child, parent_id, class_qual)
+                self._walk(child, parent_id, enclosing_qual, in_class)
 
-    def _handle_class(self, node: TSNode, parent_id: str) -> None:
+    def _handle_class(self, node: TSNode, parent_id: str, enclosing_qual: str) -> None:
         name_node = node.child_by_field_name("name")
         if name_node is None:
             return
         name = _text(self.src, name_node)
-        qual = f"{self.module}.{name}"
+        qual = f"{enclosing_qual}.{name}"
         body = node.child_by_field_name("body")
         cls = self._add("class", name, qual, node, body)
         self.edges.append(Edge("CONTAINS", parent_id, cls.id, EXTRACTED))
@@ -216,7 +219,7 @@ class _FileExtractor:
                 if bname:
                     self.bases.append((cls.id, bname))
         if body is not None:
-            self._walk(body, parent_id=cls.id, class_qual=qual)
+            self._walk(body, parent_id=cls.id, enclosing_qual=qual, in_class=True)
 
     def _orm_tablename(self, body: TSNode | None) -> str | None:
         """`__tablename__ = "users"` / `db_table = "users"` in a class body -> 'users'."""
@@ -233,13 +236,13 @@ class _FileExtractor:
                 return _clean_docstring(_text(self.src, right))
         return None
 
-    def _handle_function(self, node: TSNode, parent_id: str, class_qual: str | None) -> None:
+    def _handle_function(self, node: TSNode, parent_id: str, enclosing_qual: str, in_class: bool) -> None:
         name_node = node.child_by_field_name("name")
         if name_node is None:
             return
         name = _text(self.src, name_node)
-        kind = "method" if class_qual else "function"
-        qual = f"{class_qual}.{name}" if class_qual else f"{self.module}.{name}"
+        kind = "method" if in_class else "function"
+        qual = f"{enclosing_qual}.{name}"
         body = node.child_by_field_name("body")
         fn = self._add(kind, name, qual, node, body)
         self.edges.append(Edge("CONTAINS", parent_id, fn.id, EXTRACTED))
@@ -247,8 +250,9 @@ class _FileExtractor:
         if body is not None:
             self._collect_calls(body, fn.id)
             self._collect_sql(body, fn.id)
-            # Nested defs / classes inside the function body.
-            self._walk(body, parent_id=fn.id, class_qual=class_qual)
+            # Nested defs / classes own their own scope: a local `def helper()` inside
+            # a method is a function `…Class.method.helper`, never a phantom method.
+            self._walk(body, parent_id=fn.id, enclosing_qual=qual, in_class=False)
 
     def _collect_sql(self, node: TSNode, owner_id: str) -> None:
         """Record string literals that contain SQL, owned by the enclosing def/module."""
@@ -442,15 +446,19 @@ def extract_paths(paths: list[Path], root: Path, resolver: str = "heuristic") ->
                 for c in _heuristic_targets(caller, name, is_self):
                     _add_call(caller_id, c.id, "tree-sitter")
 
-    # Resolve inheritance (EXTRACTED structure; target may be external -> skip).
+    # Resolve inheritance. A unique name match is deterministic (EXTRACTED); when
+    # several same-named classes exist, at most one edge is right — every candidate
+    # is a guess and must say so (INFERRED), per the confidence invariant.
     for fx in extractors:
         for cls_id, base in fx.bases:
-            for c in name_index.get(base, []):
-                if c.kind == "class" and c.id != cls_id:
-                    key = ("INHERITS", cls_id, c.id)
-                    if key not in seen:
-                        seen.add(key)
-                        edges.append(Edge("INHERITS", cls_id, c.id, EXTRACTED))
+            matches = [c for c in name_index.get(base, [])
+                       if c.kind == "class" and c.id != cls_id]
+            confidence = EXTRACTED if len(matches) == 1 else INFERRED
+            for c in matches:
+                key = ("INHERITS", cls_id, c.id)
+                if key not in seen:
+                    seen.add(key)
+                    edges.append(Edge("INHERITS", cls_id, c.id, confidence))
 
     # Resolve imports: internal module if known, else an external module node.
     ext_nodes: dict[str, Node] = {}

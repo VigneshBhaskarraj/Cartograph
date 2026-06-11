@@ -107,3 +107,16 @@ def test_hybrid_accepts_weights(tmp_path):
     hits = r.hybrid("bark sound", k=5, rrf_k=20, weights=(2.0, 0.5, 1.0), depth=50)
     assert hits and all(isinstance(i, str) and isinstance(s, float) for i, s in hits)
     store.close()
+
+
+def test_retriever_rejects_mismatched_embedder_dim(tmp_path):
+    """Audit M1: an explicit query embedder narrower/wider than the index must fail
+    with a clear error at construction, not a numpy crash mid-query."""
+    import pytest
+
+    from cartograph.embed import HashEmbedder
+
+    store = _store(tmp_path)  # indexed at dim=128
+    with pytest.raises(ValueError, match="dim"):
+        Retriever(store, embedder=HashEmbedder(dim=64))
+    store.close()

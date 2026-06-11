@@ -2,189 +2,247 @@
   "1": {
     "mode": "STRUCT",
     "anchors": {
-      "Flask.dispatch_request": [
-        "flask/src/flask/app.py::flask.src.flask.app.Flask.dispatch_request#966"
+      "Client._send_handling_auth": [
+        "httpx/_client.py::httpx._client.Client._send_handling_auth#942"
       ],
-      "Flask.preprocess_request": [
-        "flask/src/flask/app.py::flask.src.flask.app.Flask.preprocess_request#1366"
+      "Client._send_handling_redirects": [
+        "httpx/_client.py::httpx._client.Client._send_handling_redirects#976"
       ],
-      "Flask.finalize_request": [
-        "flask/src/flask/app.py::flask.src.flask.app.Flask.finalize_request#1021"
+      "Client._send_single_request": [
+        "httpx/_client.py::httpx._client.Client._send_single_request#1013"
       ],
-      "Flask.handle_user_exception": [
-        "flask/src/flask/app.py::flask.src.flask.app.Flask.handle_user_exception#865"
+      "BaseTransport.handle_request": [
+        "httpx/_transports/base.py::httpx._transports.base.BaseTransport.handle_request#26"
       ]
     }
   },
   "2": {
     "mode": "STRUCT",
     "anchors": {
-      "App": [
-        "flask/src/flask/sansio/app.py::flask.src.flask.sansio.app.App#59"
+      "HTTPTransport": [
+        "httpx/_transports/default.py::httpx._transports.default.HTTPTransport#124"
       ],
-      "flask.sansio.app": [
-        "flask/src/flask/sansio/app.py::flask.src.flask.sansio.app"
+      "MockTransport": [
+        "httpx/_transports/mock.py::httpx._transports.mock.MockTransport#15"
+      ],
+      "WSGITransport": [
+        "httpx/_transports/wsgi.py::httpx._transports.wsgi.WSGITransport#44"
+      ],
+      "AsyncHTTPTransport": [
+        "httpx/_transports/default.py::httpx._transports.default.AsyncHTTPTransport#265"
+      ],
+      "ASGITransport": [
+        "httpx/_transports/asgi.py::httpx._transports.asgi.ASGITransport#50"
       ]
     }
   },
   "3": {
     "mode": "STRUCT",
     "anchors": {
-      "SecureCookieSessionInterface": [
-        "flask/src/flask/sessions.py::flask.src.flask.sessions.SecureCookieSessionInterface#284"
+      "BasicAuth": [
+        "httpx/_auth.py::httpx._auth.BasicAuth#126"
+      ],
+      "DigestAuth": [
+        "httpx/_auth.py::httpx._auth.DigestAuth#175"
+      ],
+      "NetRCAuth": [
+        "httpx/_auth.py::httpx._auth.NetRCAuth#145"
+      ],
+      "FunctionAuth": [
+        "httpx/_auth.py::httpx._auth.FunctionAuth#113"
       ]
     }
   },
   "4": {
     "mode": "STRUCT",
     "anchors": {
-      "Flask.full_dispatch_request": [
-        "flask/src/flask/app.py::flask.src.flask.app.Flask.full_dispatch_request#992"
-      ],
-      "Flask.request_context": [
-        "flask/src/flask/app.py::flask.src.flask.app.Flask.request_context#1501"
-      ],
-      "Flask.handle_exception": [
-        "flask/src/flask/app.py::flask.src.flask.app.Flask.handle_exception#897"
+      "_transports.default": [
+        "httpx/_transports/default.py::httpx._transports.default"
       ]
     }
   },
   "5": {
-    "mode": "MULTIHOP",
+    "mode": "STRUCT",
     "anchors": {
-      "Flask.__call__": [
-        "flask/src/flask/app.py::flask.src.flask.app.Flask.__call__#1618"
-      ],
-      "Flask.wsgi_app": [
-        "flask/src/flask/app.py::flask.src.flask.app.Flask.wsgi_app#1566"
-      ],
-      "Flask.full_dispatch_request": [
-        "flask/src/flask/app.py::flask.src.flask.app.Flask.full_dispatch_request#992"
-      ],
-      "Flask.dispatch_request": [
-        "flask/src/flask/app.py::flask.src.flask.app.Flask.dispatch_request#966"
+      "Request.__init__": [
+        "httpx/_models.py::httpx._models.Request.__init__#311"
       ]
     }
   },
   "6": {
     "mode": "MULTIHOP",
     "anchors": {
-      "url_for": [
-        "flask/src/flask/app.py::flask.src.flask.app.Flask.url_for#1102",
-        "flask/src/flask/helpers.py::flask.src.flask.helpers.url_for#200"
+      "Client.send": [
+        "httpx/_client.py::httpx._client.Client.send#891"
       ],
-      "Flask.url_for": [
-        "flask/src/flask/app.py::flask.src.flask.app.Flask.url_for#1102"
+      "Client._send_single_request": [
+        "httpx/_client.py::httpx._client.Client._send_single_request#1013"
+      ],
+      "BaseTransport.handle_request": [
+        "httpx/_transports/base.py::httpx._transports.base.BaseTransport.handle_request#26"
       ]
     }
   },
   "7": {
     "mode": "MULTIHOP",
     "anchors": {
-      "Flask.handle_user_exception": [
-        "flask/src/flask/app.py::flask.src.flask.app.Flask.handle_user_exception#865"
+      "AsyncClient.send": [
+        "httpx/_client.py::httpx._client.AsyncClient.send#1639"
       ],
-      "Flask.handle_http_exception": [
-        "flask/src/flask/app.py::flask.src.flask.app.Flask.handle_http_exception#830"
+      "AsyncClient._send_single_request": [
+        "httpx/_client.py::httpx._client.AsyncClient._send_single_request#1762"
       ],
-      "Flask.finalize_request": [
-        "flask/src/flask/app.py::flask.src.flask.app.Flask.finalize_request#1021"
+      "AsyncBaseTransport.handle_async_request": [
+        "httpx/_transports/base.py::httpx._transports.base.AsyncBaseTransport.handle_async_request#77"
       ]
     }
   },
   "8": {
-    "mode": "SEMANTIC",
+    "mode": "MULTIHOP+SEMANTIC",
     "anchors": {
-      "SecureCookieSessionInterface.open_session": [
-        "flask/src/flask/sessions.py::flask.src.flask.sessions.SecureCookieSessionInterface.open_session#323"
+      "DigestAuth.auth_flow": [
+        "httpx/_auth.py::httpx._auth.DigestAuth.auth_flow#193"
       ],
-      "SecureCookieSessionInterface.save_session": [
-        "flask/src/flask/sessions.py::flask.src.flask.sessions.SecureCookieSessionInterface.save_session#337"
+      "DigestAuth": [
+        "httpx/_auth.py::httpx._auth.DigestAuth#175"
       ]
     }
   },
   "9": {
-    "mode": "SEMANTIC",
+    "mode": "MULTIHOP+SEMANTIC",
     "anchors": {
-      "Flask.ensure_sync": [
-        "flask/src/flask/app.py::flask.src.flask.app.Flask.ensure_sync#1065"
+      "Timeout": [
+        "httpx/_config.py::httpx._config.Timeout#196"
       ],
-      "Flask.async_to_sync": [
-        "flask/src/flask/app.py::flask.src.flask.app.Flask.async_to_sync#1079"
+      "Client._send_single_request": [
+        "httpx/_client.py::httpx._client.Client._send_single_request#1013"
       ]
     }
   },
   "10": {
     "mode": "SEMANTIC",
     "anchors": {
-      "flash": [
-        "flask/src/flask/helpers.py::flask.src.flask.helpers.flash#326"
+      "HTTPTransport": [
+        "httpx/_transports/default.py::httpx._transports.default.HTTPTransport#124"
       ],
-      "get_flashed_messages": [
-        "flask/src/flask/helpers.py::flask.src.flask.helpers.get_flashed_messages#360"
+      "AsyncHTTPTransport": [
+        "httpx/_transports/default.py::httpx._transports.default.AsyncHTTPTransport#265"
       ]
     }
   },
   "11": {
-    "mode": "CROSS",
+    "mode": "SEMANTIC",
     "anchors": {
-      "render_template": [
-        "flask/src/flask/templating.py::flask.src.flask.templating.render_template#136"
+      "GZipDecoder": [
+        "httpx/_decoders.py::httpx._decoders.GZipDecoder#67"
       ],
-      "_render": [
-        "flask/src/flask/templating.py::flask.src.flask.templating._render#123"
+      "BrotliDecoder": [
+        "httpx/_decoders.py::httpx._decoders.BrotliDecoder#90"
       ],
-      "flask.templating": [
-        "flask/src/flask/templating.py::flask.src.flask.templating"
+      "ContentDecoder": [
+        "httpx/_decoders.py::httpx._decoders.ContentDecoder#18"
       ]
     }
   },
   "12": {
-    "mode": "CROSS",
+    "mode": "SEMANTIC",
     "anchors": {
-      "jsonify": [
-        "flask/src/flask/json/__init__.py::flask.src.flask.json.jsonify#138"
-      ],
-      "DefaultJSONProvider.response": [
-        "flask/src/flask/json/provider.py::flask.src.flask.json.provider.DefaultJSONProvider.response#189"
-      ],
-      "JSONProvider.response": [
-        "flask/src/flask/json/provider.py::flask.src.flask.json.provider.JSONProvider.response#89"
+      "Cookies": [
+        "httpx/_models.py::httpx._models.Cookies#1013"
       ]
     }
   },
   "13": {
-    "mode": "EXACT",
+    "mode": "SEMANTIC",
     "anchors": {
-      "AppContext": [
-        "flask/src/flask/ctx.py::flask.src.flask.ctx.AppContext#260"
+      "encode_request": [
+        "httpx/_content.py::httpx._content.encode_request#184"
       ],
-      "AppContext.push": [
-        "flask/src/flask/ctx.py::flask.src.flask.ctx.AppContext.push#416"
+      "httpx._multipart": [
+        "httpx/_multipart.py::httpx._multipart"
       ]
     }
   },
   "14": {
-    "mode": "EXACT",
+    "mode": "SEMANTIC+EXACT",
     "anchors": {
-      "copy_current_request_context": [
-        "flask/src/flask/ctx.py::flask.src.flask.ctx.copy_current_request_context#154"
+      "create_ssl_context": [
+        "httpx/_config.py::httpx._config.create_ssl_context#49"
       ]
     }
   },
   "15": {
-    "mode": "WHY",
+    "mode": "CROSS",
     "anchors": {
-      "Flask.wsgi_app": [
-        "flask/src/flask/app.py::flask.src.flask.app.Flask.wsgi_app#1566"
+      "Client._send_handling_auth": [
+        "httpx/_client.py::httpx._client.Client._send_handling_auth#942"
+      ],
+      "Client._send_handling_redirects": [
+        "httpx/_client.py::httpx._client.Client._send_handling_redirects#976"
       ]
     }
   },
   "16": {
+    "mode": "CROSS",
+    "anchors": {
+      "Auth.sync_auth_flow": [
+        "httpx/_auth.py::httpx._auth.Auth.sync_auth_flow#62"
+      ],
+      "DigestAuth.auth_flow": [
+        "httpx/_auth.py::httpx._auth.DigestAuth.auth_flow#193"
+      ]
+    }
+  },
+  "17": {
+    "mode": "CROSS",
+    "anchors": {
+      "BaseClient.event_hooks": [
+        "httpx/_client.py::httpx._client.BaseClient.event_hooks#242",
+        "httpx/_client.py::httpx._client.BaseClient.event_hooks#246"
+      ],
+      "Client._send_single_request": [
+        "httpx/_client.py::httpx._client.Client._send_single_request#1013"
+      ]
+    }
+  },
+  "18": {
+    "mode": "EXACT",
+    "anchors": {
+      "ClientState": [
+        "httpx/_client.py::httpx._client.ClientState#99"
+      ]
+    }
+  },
+  "19": {
+    "mode": "EXACT",
+    "anchors": {
+      "URL": [
+        "httpx/_urls.py::httpx._urls.URL#15"
+      ],
+      "QueryParams": [
+        "httpx/_urls.py::httpx._urls.QueryParams#420"
+      ]
+    }
+  },
+  "20": {
     "mode": "WHY",
     "anchors": {
-      "AppContext.push": [
-        "flask/src/flask/ctx.py::flask.src.flask.ctx.AppContext.push#416"
+      "BaseTransport.handle_request": [
+        "httpx/_transports/base.py::httpx._transports.base.BaseTransport.handle_request#26"
+      ],
+      "AsyncBaseTransport.handle_async_request": [
+        "httpx/_transports/base.py::httpx._transports.base.AsyncBaseTransport.handle_async_request#77"
+      ]
+    }
+  },
+  "21": {
+    "mode": "WHY+EXACT",
+    "anchors": {
+      "Client.__enter__": [
+        "httpx/_client.py::httpx._client.Client.__enter__#1288"
+      ],
+      "ClientState": [
+        "httpx/_client.py::httpx._client.ClientState#99"
       ]
     }
   }

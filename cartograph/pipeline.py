@@ -84,13 +84,24 @@ def _extract_embedded_sql(graph: Graph) -> None:
     new_nodes, contains, pending_fks, pending_queries, pending_joins, pending_cols = extract_embedded_sql(units)
 
     by_qual = {n.qualified_name: n for n in graph.nodes if n.kind == "table"}
+    col_quals = {n.qualified_name for n in graph.nodes if n.kind == "column"}
     by_id = {n.id for n in graph.nodes}
-    for n in new_nodes:  # dedup tables/cols already present (e.g. also in a .sql file)
-        if n.id not in by_id and n.qualified_name not in (by_qual if n.kind == "table" else {}):
-            graph.nodes.append(n)
-            by_id.add(n.id)
-            if n.kind == "table":
-                by_qual[n.qualified_name] = n
+    # Dedup tables AND columns by qualified name: the same CREATE TABLE appearing in
+    # a .sql file and embedded in Python must not mint orphan duplicate column nodes
+    # (they pollute candidates and double-count in eval gold sets).
+    for n in new_nodes:
+        if n.id in by_id:
+            continue
+        if n.kind == "table" and n.qualified_name in by_qual:
+            continue
+        if n.kind == "column" and n.qualified_name in col_quals:
+            continue
+        graph.nodes.append(n)
+        by_id.add(n.id)
+        if n.kind == "table":
+            by_qual[n.qualified_name] = n
+        elif n.kind == "column":
+            col_quals.add(n.qualified_name)
     valid = by_id
     seen = {(e.type, e.src, e.dst) for e in graph.edges}
     for e in contains:
@@ -156,6 +167,8 @@ def embed_graph(graph: Graph, embedder=None, cache: EmbeddingCache | None = None
     """Embed every node, reusing `cache` for unchanged embed_text. Returns (reused, embedded)."""
     embedder = embedder or get_embedder()
     dim = getattr(embedder, "dim", None)
+    if not getattr(embedder, "dim_is_exact", True):
+        dim = None  # unconfirmed width (Ollama before its first call) must not void cache hits
     pending_idx, pending_text = [], []
     reused = 0
     for i, n in enumerate(graph.nodes):
@@ -229,7 +242,8 @@ def update_index(path: Path, db_path: Path, dim: int = DEFAULT_DIM, embedder=Non
     **row-level delta**: rebuild the graph in memory (re-parse is cheap; embeddings
     come from the content-hash cache), then keep unchanged node rows (matched by
     content_sha) and only delete/recreate changed ones, refreshing edges. Falls back
-    to a full rebuild if the embedder dimension changed."""
+    to a full rebuild if the embedder (or its dimension) changed; with no explicit
+    embedder it adopts the one recorded in the graph at index time."""
     path, db_path = Path(path), Path(db_path)
     if not db_path.exists():
         index_path(path, db_path, dim=dim, embedder=embedder, resolver=resolver).close()
@@ -239,20 +253,50 @@ def update_index(path: Path, db_path: Path, dim: int = DEFAULT_DIM, embedder=Non
     if not (delta["changed"] or delta["deleted"]):
         return {"status": "up-to-date", **delta, "embedded": 0, "reused": 0, "created": 0, "removed": 0}
 
+    meta_store = Store(db_path)
+    prev_dim = meta_store.get_meta("embedding_dim")
+    prev_backend = meta_store.get_meta("embedder_backend")
+    prev_model = meta_store.get_meta("embedder_model") or ""
+    meta_store.close()
+    if embedder is None and prev_backend:
+        # A plain `update` must keep the index's embedder: defaulting to hash on an
+        # ollama-built graph would mix vector spaces (both 768-dim — nothing errors).
+        try:
+            embedder = get_embedder(prev_backend, dim=int(prev_dim) if prev_dim else dim,
+                                    model=prev_model or None)
+        except ValueError:
+            pass  # unknown recorded backend (hand-built store) — use the default
     embedder = embedder or get_embedder(dim=dim)
-    graph = build_graph(path, resolver=resolver)
+    try:
+        graph = build_graph(path, resolver=resolver)
+    except FileNotFoundError:
+        # Every source file is gone: the correct delta is "delete everything",
+        # not a crash that leaves the stale graph serving answers.
+        store = Store(db_path)
+        removed = len(store.node_shas())
+        store.delete_all_edges()
+        store.conn.execute("MATCH (c:CodeNode) DETACH DELETE c")
+        for rel in delta["deleted"]:
+            store.delete_meta(f"file:{rel}")
+        store.close()
+        return {"status": "updated", **delta, "embedded": 0, "reused": 0,
+                "created": 0, "removed": removed}
     cache = EmbeddingCache.for_embedder(db_path.parent / "cache", getattr(embedder, "name", "hash")) if use_cache else None
     reused, embedded = embed_graph(graph, embedder=embedder, cache=cache)
     if cache is not None:
         cache.save()
     actual_dim = len(graph.nodes[0].embedding) if graph.nodes and graph.nodes[0].embedding else dim
 
-    store = Store(db_path)
-    prev_dim = store.get_meta("embedding_dim")
-    if prev_dim is not None and int(prev_dim) != actual_dim:
-        store.close()  # vector column is fixed-size; a dim change needs a rebuild
+    name = getattr(embedder, "name", "hash")
+    backend, _, model = name.partition(":")
+    # A dim change can't share the fixed-size vector column; an *explicit* embedder
+    # change must not keep old vectors on unchanged rows — either way, full rebuild.
+    if (prev_dim is not None and int(prev_dim) != actual_dim) or (
+            prev_backend is not None and (prev_backend, prev_model) != (backend, model)):
         index_path(path, db_path, dim=actual_dim, embedder=embedder, overwrite=True, resolver=resolver).close()
         return {"status": "rebuilt", **delta, "embedded": embedded, "reused": reused, "created": 0, "removed": 0}
+
+    store = Store(db_path)
 
     db_sha = store.node_shas()
     keep = {n.id for n in graph.nodes if db_sha.get(n.id) == n.content_sha}

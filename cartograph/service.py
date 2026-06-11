@@ -94,6 +94,7 @@ class CartographService:
         """Hybrid (default) retrieval; returns ranked nodes with scores."""
         if mode not in self.modes:
             raise ValueError(f"mode must be one of {sorted(self.modes)}")
+        k = max(1, min(int(k), 100))  # k<=0 would slice wrong; huge k is an agent typo
         hits = self.retriever.retrieve(text, mode=mode, k=k)
         return [n for n in (self._node(i, s) for i, s in hits) if n]
 

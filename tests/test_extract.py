@@ -99,3 +99,69 @@ def test_rationale_node():
     rationale = _by_kind(graph, "rationale")
     assert any("bark" in n.docstring for n in rationale)
     assert any(e.type == "DOCUMENTS" for e in graph.edges)
+
+
+def test_nested_scopes_get_true_qualified_names():
+    """Audit H2: nested defs/classes must carry their full lexical scope — a local
+    helper inside a method is NOT a method of the class (phantom-edge source)."""
+    src = (
+        "class Outer:\n"
+        "    class Inner:\n"
+        "        def m(self):\n"
+        "            pass\n"
+        "    def method(self):\n"
+        "        def helper():\n"
+        "            pass\n"
+        "        return helper\n"
+        "\n"
+        "def top():\n"
+        "    def inner():\n"
+        "        pass\n"
+    )
+    fx = extract_source(src, "m.py", "m")
+    by_qual = {n.qualified_name: n for n in fx.nodes}
+    assert "m.Outer.Inner" in by_qual and by_qual["m.Outer.Inner"].kind == "class"
+    assert by_qual["m.Outer.Inner.m"].kind == "method"
+    helper = by_qual["m.Outer.method.helper"]
+    assert helper.kind == "function"  # local def in a method is not a method
+    assert "m.helper" not in by_qual and "m.Outer.helper" not in by_qual
+    assert by_qual["m.top.inner"].kind == "function"
+    assert "m.inner" not in by_qual
+
+
+def test_local_helper_does_not_steal_self_calls():
+    """Audit H2 downstream: `self.close()` in a class with no `close` method must not
+    bind to a local helper that previously masqueraded as `A.close`."""
+    src = (
+        "class A:\n"
+        "    def run(self):\n"
+        "        def close():\n"
+        "            pass\n"
+        "        self.close()\n"
+    )
+    graph = extract_paths_from_source(src)
+    by_id = {n.id: n for n in graph.nodes}
+    calls = [(by_id[e.src].qualified_name, by_id[e.dst].qualified_name)
+             for e in graph.edges if e.type == "CALLS"]
+    # The same-class heuristic must not match m.A.run.close as a method of A.
+    assert ("m.A.run", "m.A.close") not in calls
+
+
+def extract_paths_from_source(src, tmp_name="m.py"):
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / tmp_name
+        p.write_text(src)
+        return extract_paths([p], root=p)
+
+
+def test_ambiguous_inheritance_is_inferred(tmp_path):
+    """Audit L2: with two same-named base classes, every INHERITS edge is a guess."""
+    (tmp_path / "a.py").write_text("class Base:\n    pass\n")
+    (tmp_path / "b.py").write_text("class Base:\n    pass\n")
+    (tmp_path / "c.py").write_text("class Child(Base):\n    pass\n")
+    graph = extract_paths(sorted(tmp_path.glob("*.py")), root=tmp_path)
+    inherits = [e for e in graph.edges if e.type == "INHERITS"]
+    assert len(inherits) == 2
+    assert all(e.confidence == "INFERRED" for e in inherits)

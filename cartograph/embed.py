@@ -60,6 +60,7 @@ class HashEmbedder:
     """Feature-hashing embedder: deterministic, offline, dependency-free."""
 
     name = "hash"
+    dim_is_exact = True  # output width always equals the declared dim
 
     def __init__(self, dim: int = DEFAULT_DIM):
         self.dim = dim
@@ -90,6 +91,9 @@ class OllamaEmbedder:
         self.host = (host or os.environ.get("OLLAMA_HOST") or "http://127.0.0.1:11434").rstrip("/")
         _check_loopback(self.host)
         self.dim = dim
+        # The model decides the true width (nomic 768, mxbai 1024, …); until the
+        # first call confirms it, `dim` is a guess and must not gate cache hits.
+        self.dim_is_exact = False
 
     def embed(self, text: str) -> list[float]:
         payload = json.dumps({"model": self.model, "prompt": text}).encode()
@@ -105,7 +109,10 @@ class OllamaEmbedder:
                 f"run `ollama serve`, and `ollama pull {self.model}` — or omit the embedder "
                 "flag to use the offline default."
             ) from e
-        return data["embedding"]
+        vec = data["embedding"]
+        self.dim = len(vec)
+        self.dim_is_exact = True
+        return vec
 
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
         return [self.embed(t) for t in texts]

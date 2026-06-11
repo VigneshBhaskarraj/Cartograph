@@ -29,7 +29,11 @@ from cartograph.retrieve import Retriever  # noqa: E402
 
 DEFAULT_DB = "cartograph-out/httpx.kuzu"
 MODE_COLS = ["STRUCT", "MULTIHOP", "SEMANTIC", "EXACT", "CROSS", "WHY"]
-PRECISION_QIDS = {1, 2, 3, 4, 5}  # small, well-defined answer sets
+# precision@5 only makes sense where the gold set is the complete answer (a
+# structural/exact/mapping question), not a sample of acceptable ones. Previously a
+# hardcoded qid set chosen for the httpx file was applied to every corpus, making
+# the per-corpus prec@5 columns incomparable.
+PRECISION_MODES = {"STRUCT", "EXACT", "CROSS"}
 
 
 def _mean(xs: list[float]) -> float:
@@ -61,7 +65,7 @@ def run(db: str, retriever_name: str, embedder_name: str | None, out: str | None
         r5.append(hit5)
         r10.append(hit10)
         mrr.append(reciprocal_rank(ranked, gold))
-        if q["id"] in PRECISION_QIDS:
+        if set(modes_of(q)) <= PRECISION_MODES:
             p5.append(precision_at_k(ranked, gold, 5))
         for m in modes_of(q):
             if m in per_mode:

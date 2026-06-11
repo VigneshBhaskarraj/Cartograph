@@ -47,9 +47,17 @@ class Retriever:
             if i in self.valid:
                 self.ids.append(i)
                 self.vecs.append(v)
+        index_dim = next((len(v) for v in self.vecs if v), None)
         if embedder is None:
-            dim = next((len(v) for v in self.vecs if v), None)
-            embedder = get_embedder(dim=dim) if dim else get_embedder()
+            embedder = get_embedder(dim=index_dim) if index_dim else get_embedder()
+        # An explicit embedder whose width differs from the index would crash deep
+        # inside numpy at query time; fail here with the actual mismatch instead.
+        emb_dim = getattr(embedder, "dim", None)
+        if (index_dim and emb_dim and getattr(embedder, "dim_is_exact", True)
+                and emb_dim != index_dim):
+            raise ValueError(
+                f"query embedder dim {emb_dim} != index dim {index_dim}; "
+                "drop the embedder override or re-index with this embedder")
         self.embedder = embedder
         self._build_lexical()
         self._build_adjacency()

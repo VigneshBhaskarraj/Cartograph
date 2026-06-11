@@ -65,3 +65,26 @@ def test_index_path_persists_and_reuses_cache(tmp_path):
     reused, embedded = s2.cache_stats
     s2.close()
     assert embedded == 0 and reused == n  # second run: all reused
+
+
+def test_unverified_dim_does_not_void_cache_hits(tmp_path):
+    """Audit M2: an embedder whose declared dim is a guess (Ollama before its first
+    call) must still reuse cached vectors of the model's true width."""
+    from cartograph.model import Graph, Node
+    from cartograph.pipeline import embed_graph
+
+    class _LazyDim:
+        name = "ollama:fake-1024"
+        dim = 768            # the default guess
+        dim_is_exact = False  # …but unconfirmed until a real call
+
+        def embed_batch(self, texts):
+            raise AssertionError("cache should have served every vector")
+
+    cache = EmbeddingCache(tmp_path / "c.json")
+    n = Node(id="x", kind="function", name="f", qualified_name="m.f", module="m",
+             file_path="m.py", start_line=1, end_line=2, embed_text="def f()")
+    cache.put(n.embed_text, [0.5] * 1024)  # true model width != declared dim
+    reused, embedded = embed_graph(Graph(nodes=[n]), embedder=_LazyDim(), cache=cache)
+    assert (reused, embedded) == (1, 0)
+    assert len(n.embedding) == 1024

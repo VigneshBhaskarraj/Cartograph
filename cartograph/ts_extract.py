@@ -231,15 +231,22 @@ def extract_ts_paths(paths: list[Path], root: Path) -> Graph:
 
     for f in files:
         for cls_id, base in f.bases:
-            for c in name_index.get(base, []):
-                if c.kind in ("class", "interface") and c.id != cls_id and ("INHERITS", cls_id, c.id) not in seen:
+            matches = [c for c in name_index.get(base, [])
+                       if c.kind in ("class", "interface") and c.id != cls_id]
+            confidence = EXTRACTED if len(matches) == 1 else INFERRED
+            for c in matches:
+                if ("INHERITS", cls_id, c.id) not in seen:
                     seen.add(("INHERITS", cls_id, c.id))
-                    edges.append(Edge("INHERITS", cls_id, c.id, EXTRACTED))
+                    edges.append(Edge("INHERITS", cls_id, c.id, confidence))
 
     ext: dict[str, Node] = {}
     for f in files:
         for mod_id, source in f.imports:
-            internal = next((m for q, m in module_index.items() if q.endswith(source.split("/")[-1])), None)
+            # Name-boundary match: './utils' must bind to `pkg.utils`, never to a
+            # module that merely ends with the substring (`pkg.statsutils`).
+            src = source.split("/")[-1]
+            internal = next(
+                (m for q, m in module_index.items() if q == src or q.endswith("." + src)), None)
             if internal is not None:
                 dst = internal.id
             else:
