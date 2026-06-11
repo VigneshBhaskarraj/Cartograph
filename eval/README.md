@@ -142,7 +142,8 @@ the code↔schema boundary ("which table does the `User` model map to", "what co
 a user's orders", "FK into users", …).
 
 ```bash
-uv run cartograph index eval/bridge_corpus --db cartograph-out/bridge.kuzu   # needs --extra sql
+uv sync --extra sql                                                          # sqlglot, needed first
+uv run cartograph index eval/bridge_corpus --db cartograph-out/bridge.kuzu
 uv run python eval/resolve_anchors.py --db cartograph-out/bridge.kuzu --questions eval/bridge_questions.yaml --check
 uv run python eval/run_eval.py --db cartograph-out/bridge.kuzu --questions eval/bridge_questions.yaml --retriever hybrid
 ```
