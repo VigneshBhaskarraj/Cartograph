@@ -245,5 +245,96 @@
         "httpx/_client.py::httpx._client.ClientState#99"
       ]
     }
+  },
+  "22": {
+    "mode": "STRUCT",
+    "anchors": {
+      "BaseClient._build_redirect_request": [
+        "httpx/_client.py::httpx._client.BaseClient._build_redirect_request#455"
+      ],
+      "BaseClient._redirect_url": [
+        "httpx/_client.py::httpx._client.BaseClient._redirect_url#497"
+      ]
+    }
+  },
+  "23": {
+    "mode": "STRUCT",
+    "anchors": {
+      "Response.raise_for_status": [
+        "httpx/_models.py::httpx._models.Response.raise_for_status#728"
+      ],
+      "HTTPStatusError": [
+        "httpx/_exceptions.py::httpx._exceptions.HTTPStatusError#258"
+      ]
+    }
+  },
+  "24": {
+    "mode": "MULTIHOP",
+    "anchors": {
+      "_api.get": [
+        "httpx/_api.py::httpx._api.get#187"
+      ],
+      "_api.request": [
+        "httpx/_api.py::httpx._api.request#38"
+      ],
+      "Client.request": [
+        "httpx/_client.py::httpx._client.Client.request#783"
+      ]
+    }
+  },
+  "25": {
+    "mode": "MULTIHOP+SEMANTIC",
+    "anchors": {
+      "Cookies.extract_cookies": [
+        "httpx/_models.py::httpx._models.Cookies.extract_cookies#1035"
+      ],
+      "Client._send_single_request": [
+        "httpx/_client.py::httpx._client.Client._send_single_request#1013"
+      ]
+    }
+  },
+  "26": {
+    "mode": "SEMANTIC",
+    "anchors": {
+      "Response.charset_encoding": [
+        "httpx/_models.py::httpx._models.Response.charset_encoding#623"
+      ],
+      "TextDecoder": [
+        "httpx/_decoders.py::httpx._decoders.TextDecoder#284"
+      ]
+    }
+  },
+  "27": {
+    "mode": "SEMANTIC",
+    "anchors": {
+      "IteratorByteStream": [
+        "httpx/_content.py::httpx._content.IteratorByteStream#42"
+      ],
+      "encode_content": [
+        "httpx/_content.py::httpx._content.encode_content#107"
+      ]
+    }
+  },
+  "28": {
+    "mode": "CROSS",
+    "anchors": {
+      "Proxy": [
+        "httpx/_config.py::httpx._config.Proxy#325"
+      ],
+      "Client._transport_for_url": [
+        "httpx/_client.py::httpx._client.Client._transport_for_url#772"
+      ]
+    }
+  },
+  "29": {
+    "mode": "WHY+EXACT",
+    "anchors": {
+      "urlparse": [
+        "httpx/_urlparse.py::httpx._urlparse.urlparse#152"
+      ],
+      "_urlparse": [
+        "httpx/_urlparse.py::httpx._urlparse"
+      ]
+    }
   }
 }

@@ -58,13 +58,21 @@ Exposes `query` / `semantic_search` / `get_node` / `neighbors` / `calls` / `call
 `shortest_path` so an agent queries structure instead of grepping. Wiring + tool
 reference: [`docs/mcp.md`](./docs/mcp.md).
 
-### Measure it
+### Measure it — including against the alternatives
 Retrieval quality is measured, never asserted (see `CLAUDE.md`). The one-command
-dashboard indexes four corpora and scores every retriever:
+dashboard indexes five corpora (89 questions — one corpus held out from all tuning)
+and scores every retriever **plus two external baselines**: `grep` over raw source,
+and `naive-rag` (structure-blind chunk embeddings):
 ```bash
-bash eval/get_corpus.sh 0.27.2 && bash eval/get_flask.sh && bash eval/get_aidigest.sh
-uv run python eval/scorecard.py                 # offline; --embedder ollama for real numbers
+bash eval/get_corpus.sh 0.27.2 && bash eval/get_flask.sh && bash eval/get_aidigest.sh && bash eval/get_click.sh
+uv run python eval/scorecard.py --baselines     # offline; --embedder ollama for real numbers
 ```
+**Does it help an agent, though?** `eval/agent_bench/` measures exactly that: an
+agent answers navigation tasks with grep-only vs cartograph-only tools. Pilot
+(matched surfaces, 12 source-verified tasks): **equal success, 42% fewer tool
+calls** for the Cartograph condition — full method, numbers, and caveats in
+[`eval/agent_bench/RESULTS.md`](./eval/agent_bench/RESULTS.md); reproduce offline
+with any local Ollama chat model via `eval/agent_bench/run_bench.py`.
 
 ## Status / roadmap
 - [x] M0 — vertical slice (extract → store → embed → query, one Python file → httpx)

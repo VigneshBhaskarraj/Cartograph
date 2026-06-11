@@ -85,3 +85,35 @@
   question: "Why does the client refuse to reopen a closed instance?"
   mode: WHY+EXACT
   anchors: ["Client.__enter__", "ClientState"]
+- id: 22
+  question: "What does the redirect loop call to build the follow-up request after a 3xx response?"
+  mode: STRUCT
+  anchors: ["BaseClient._build_redirect_request", "BaseClient._redirect_url"]
+- id: 23
+  question: "Which Response method raises an exception for 4xx and 5xx status codes?"
+  mode: STRUCT
+  anchors: ["Response.raise_for_status", "HTTPStatusError"]
+- id: 24
+  question: "How does the top-level httpx.get helper end up dispatching through a Client instance?"
+  mode: MULTIHOP
+  anchors: ["_api.get", "_api.request", "Client.request"]
+- id: 25
+  question: "How do Set-Cookie headers on a response end up in the jar that's applied to subsequent requests?"
+  mode: MULTIHOP+SEMANTIC
+  anchors: ["Cookies.extract_cookies", "Client._send_single_request"]
+- id: 26
+  question: "How does httpx pick the character encoding when turning a response body into text?"
+  mode: SEMANTIC
+  anchors: ["Response.charset_encoding", "TextDecoder"]
+- id: 27
+  question: "What happens when a generator is passed as the request body instead of a bytes object?"
+  mode: SEMANTIC
+  anchors: ["IteratorByteStream", "encode_content"]
+- id: 28
+  question: "How do proxy settings determine which transport handles a given request URL?"
+  mode: CROSS
+  anchors: ["Proxy", "Client._transport_for_url"]
+- id: 29
+  question: "Why does httpx implement its own URL parsing instead of using the standard library?"
+  mode: WHY+EXACT
+  anchors: ["urlparse", "_urlparse"]

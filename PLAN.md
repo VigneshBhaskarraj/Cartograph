@@ -254,6 +254,44 @@ be demoted honestly.
 - **Verify:** `uv run python eval/scorecard.py --embedder ollama --reindex` (hybrid ≥
   vector on mean recall@5 and mrr; mrr margin is corpus-sensitive — see above).
 
+## Gate-3 — Comparative evidence (added 2026-06-11)
+Closing the three publish-blockers: no external baseline, no agent benchmark,
+51-question eval.
+
+### G3-1 — External baselines ✅
+- **Files:** `eval/baselines.py`, `eval/scorecard.py` (`--baselines`)
+- **Done:** `grep` (term search over raw source) and `naive-rag` (40-line chunk
+  embeddings, structure-blind) scored on the identical questions/gold/metrics.
+  Graph node spans are used only to map text hits to gold ids — never as signal.
+- **Verify:** `uv run python eval/scorecard.py --baselines` prints baseline rows.
+
+### G3-2 — Eval scale: 89 questions / 5 corpora ✅
+- **Files:** `eval/click_questions.yaml` (18, NEW held-out corpus, get_click.sh),
+  `eval/questions.yaml` (+8), `eval/flask_questions.yaml` (+6),
+  `eval/bridge_questions.yaml` (+3), `eval/aidigest_questions.yaml` (+3)
+- **Done:** 51 → 89 questions. All authored by reading source (never by testing
+  retrieval); all anchors resolve. **click is held out**: written after fusion
+  calibration, excluded from any tuning — it is the generalization check.
+- **Verify:** `resolve_anchors.py --check` exits 0 on all five DBs.
+
+### G3-3 — Agent benchmark (pilot ✅, offline harness shipped)
+- **Files:** `eval/agent_bench/{tasks.yaml,run_bench.py,RESULTS.md}`,
+  `cartograph/cli.py` (new `node/resolve/calls/callers/path` commands — the MCP
+  surface over the shell, also what the benchmark's cartograph condition uses)
+- **Done:** 12 source-verified navigation tasks; pilot (Claude subagents, matched
+  tool surfaces): **equal success (12/12), 42% fewer tool calls (3.0 vs 5.2)** for
+  the Cartograph condition. Caveats recorded in RESULTS.md (n=12, strong driver
+  model, hash-indexed graphs = conservative). `run_bench.py` reproduces offline
+  with any local Ollama chat model.
+- **Verify:** `uv run python eval/agent_bench/run_bench.py --tools grep|cartograph`
+  (needs local Ollama; pilot method + numbers in RESULTS.md).
+
+### G3 open follow-ups
+- Ollama scorecard + sweep-verdict on the expanded 89-question set, esp. the
+  held-out click corpus (runs on a machine with Ollama).
+- Scale agent bench beyond n=12 and run with a weaker local model, where accuracy
+  (not just efficiency) gaps are expected to appear.
+
 ---
 
 ## Implementation notes — deviations from this plan (M0/M1 as shipped)

@@ -65,3 +65,27 @@
   question: "Why is the session opened before the request URL is matched during context push?"
   mode: WHY
   anchors: ["AppContext.push"]
+- id: 17
+  question: "What does register_blueprint call to actually attach the blueprint's routes to the app?"
+  mode: STRUCT
+  anchors: ["Blueprint.register", "App.register_blueprint"]
+- id: 18
+  question: "Trace a request for a static asset from the app's static view down to the code that opens and sends the file."
+  mode: MULTIHOP
+  anchors: ["Flask.send_static_file", "send_from_directory", "send_file"]
+- id: 19
+  question: "Where can the app's settings be loaded from outside the code, like the process environment or a config file on disk?"
+  mode: SEMANTIC
+  anchors: ["Config.from_prefixed_env", "Config.from_envvar", "Config.from_pyfile"]
+- id: 20
+  question: "What connects the session cookie to the serializer that can round-trip non-primitive values like datetimes?"
+  mode: CROSS
+  anchors: ["TaggedJSONSerializer", "SecureCookieSessionInterface"]
+- id: 21
+  question: "How does the flask command-line entry point locate and load the application object to run?"
+  mode: MULTIHOP
+  anchors: ["ScriptInfo.load_app", "locate_app", "find_best_app"]
+- id: 22
+  question: "Why do custom CLI commands need the with_appcontext decorator?"
+  mode: WHY
+  anchors: ["with_appcontext"]

@@ -1,0 +1,76 @@
+# Held-out eval set over click==8.1.7 (.corpus/click/src/click). `anchors` are
+# dotted qualified-name suffixes; a question is a hit if ANY anchor node appears
+# in the retriever's top-k. Authored by reading the source only (no retrieval
+# runs), anchors confirmed against the pinned index.
+- id: 1
+  question: "What does Command.parse_args call to parse the raw argv and then process each parameter's value?"
+  mode: STRUCT
+  anchors: ["Command.make_parser", "OptionParser.parse_args", "iter_params_for_processing", "Parameter.handle_parse_result"]
+- id: 2
+  question: "Which classes inherit from MultiCommand?"
+  mode: STRUCT
+  anchors: ["Group", "CommandCollection"]
+- id: 3
+  question: "What are the subclasses of UsageError?"
+  mode: STRUCT
+  anchors: ["BadParameter", "NoSuchOption", "BadOptionUsage", "BadArgumentUsage"]
+- id: 4
+  question: "Which classes implement the ShellComplete base class for specific shells?"
+  mode: STRUCT
+  anchors: ["BashComplete", "ZshComplete", "FishComplete"]
+- id: 5
+  question: "Trace the path from BaseCommand.main down to the user's callback function actually being executed."
+  mode: MULTIHOP
+  anchors: ["BaseCommand.main", "Command.invoke", "Context.invoke"]
+- id: 6
+  question: "How does a Group locate and run the subcommand named on the command line?"
+  mode: MULTIHOP
+  anchors: ["MultiCommand.invoke", "MultiCommand.resolve_command", "Group.get_command"]
+- id: 7
+  question: "How does passing --help end up producing the fully rendered help page?"
+  mode: MULTIHOP
+  anchors: ["Command.get_help_option", "Context.get_help", "Command.format_help", "HelpFormatter"]
+- id: 8
+  question: "Where does click check that a value given on the command line belongs to a fixed set of allowed strings, and reject it otherwise?"
+  mode: SEMANTIC
+  anchors: ["Choice", "Choice.convert"]
+- id: 9
+  question: "When a required value wasn't supplied on the command line, where does click interactively ask the user to type it in, optionally concealing what they type?"
+  mode: SEMANTIC
+  anchors: ["termui.prompt", "Option.prompt_for_value"]
+- id: 10
+  question: "Where does click draw a textual meter in the terminal showing how far through a long-running loop the program is, with a time-remaining estimate?"
+  mode: SEMANTIC
+  anchors: ["ProgressBar", "progressbar"]
+- id: 11
+  question: "When output is piped to a file instead of an interactive terminal, where does click remove the color and style escape sequences before writing?"
+  mode: SEMANTIC
+  anchors: ["strip_ansi", "should_strip_ansi", "utils.echo"]
+- id: 12
+  question: "Show me the CliRunner class and its invoke method."
+  mode: EXACT
+  anchors: ["CliRunner", "CliRunner.invoke"]
+- id: 13
+  question: "Where is get_current_context defined?"
+  mode: EXACT
+  anchors: ["get_current_context"]
+- id: 14
+  question: "Where are the version_option and confirmation_option decorators defined?"
+  mode: EXACT
+  anchors: ["version_option", "confirmation_option"]
+- id: 15
+  question: "What connects the File parameter type to the LazyFile wrapper in the utils module?"
+  mode: CROSS
+  anchors: ["File.convert", "LazyFile"]
+- id: 16
+  question: "How does BaseCommand.main hand off to the shell completion module before normal execution starts?"
+  mode: CROSS
+  anchors: ["BaseCommand._main_shell_completion", "shell_completion.shell_complete"]
+- id: 17
+  question: "Why doesn't main pass the command's return value to ctx.exit in standalone mode?"
+  mode: WHY
+  anchors: ["BaseCommand.main"]
+- id: 18
+  question: "Why does click ship its own option parser module instead of reusing optparse from the standard library?"
+  mode: WHY
+  anchors: ["OptionParser", "click.parser"]

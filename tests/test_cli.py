@@ -113,3 +113,24 @@ def test_index_venv_skipped_only_when_real_venv(tmp_path):
     (venv / "junk.py").write_text("x = 1\n")
     found = [f.name for f in _files(tmp_path, ".py")]
     assert found == ["real.py"]
+
+
+def test_structural_cli_commands(tmp_path):
+    """node/resolve/calls/callers/path expose the MCP surface over the shell."""
+    db = str(tmp_path / "g.kuzu")
+    r = runner.invoke(app, ["index", str(FIX), "--db", db])
+    assert r.exit_code == 0
+    r = runner.invoke(app, ["node", "Dog", "--db", db])
+    assert r.exit_code == 0 and "qualified_name" in r.output
+    r = runner.invoke(app, ["resolve", "speak", "--db", db])
+    assert r.exit_code == 0 and "speak" in r.output
+    r = runner.invoke(app, ["calls", "Dog.speak", "--db", db])
+    assert r.exit_code == 0 and "bark" in r.output
+    r = runner.invoke(app, ["callers", "bark", "--db", db])
+    assert r.exit_code == 0 and "speak" in r.output
+    r = runner.invoke(app, ["path", "Dog", "bark", "--db", db])
+    assert r.exit_code == 0 and "bark" in r.output
+    r = runner.invoke(app, ["node", "no_such_symbol_xyz", "--db", db])
+    assert r.exit_code == 1
+    r = runner.invoke(app, ["calls", "x", "--db", str(tmp_path / "missing.kuzu")])
+    assert r.exit_code == 1 and "no graph at" in r.output

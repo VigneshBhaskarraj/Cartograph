@@ -114,6 +114,99 @@ def query(
     store.close()
 
 
+# -- structural commands ------------------------------------------------------
+# The same graph surface the MCP server exposes, but over the shell: any agent
+# that can run a command can use the graph — no MCP wiring required.
+
+def _service_or_exit(db: str):
+    from .service import CartographService
+
+    try:
+        return CartographService(db)
+    except (FileNotFoundError, RuntimeError) as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
+
+
+def _echo_nodes(nodes: list[dict], empty_msg: str) -> None:
+    if not nodes:
+        typer.echo(empty_msg)
+        return
+    for n in nodes:
+        rel = f" <{n['relation']}:{n['direction']}>" if "relation" in n else ""
+        typer.echo(f"[{n['kind']}] {n['qualified_name']}{rel}  ({n['file_path']}:{n['start_line']})")
+        if n.get("signature"):
+            typer.echo(f"    {n['signature']}")
+
+
+@app.command()
+def node(
+    ref: str = typer.Argument(..., help="Node id, qualified name (a.b.C.m), or bare name."),
+    db: str = typer.Option(DEFAULT_DB, help="Kuzu DB path."),
+) -> None:
+    """Full detail for one symbol (docstring included). Use `resolve` for ambiguity."""
+    svc = _service_or_exit(db)
+    n = svc.get_node(ref)
+    if n is None:
+        typer.echo(f"no node matches {ref!r}", err=True)
+        svc.close()
+        raise typer.Exit(1)
+    for key in ("kind", "qualified_name", "file_path", "start_line", "signature"):
+        typer.echo(f"{key}: {n[key]}")
+    if n.get("docstring"):
+        typer.echo(f"docstring: {n['docstring']}")
+    svc.close()
+
+
+@app.command()
+def resolve(
+    ref: str = typer.Argument(..., help="Qualified name or bare name to disambiguate."),
+    db: str = typer.Option(DEFAULT_DB, help="Kuzu DB path."),
+) -> None:
+    """All symbols a reference could mean (then use the qualified name you want)."""
+    svc = _service_or_exit(db)
+    _echo_nodes(svc.resolve(ref), f"no node matches {ref!r}")
+    svc.close()
+
+
+@app.command()
+def calls(
+    ref: str = typer.Argument(..., help="The caller: node id, qualified name, or bare name."),
+    db: str = typer.Option(DEFAULT_DB, help="Kuzu DB path."),
+) -> None:
+    """What this symbol calls (outgoing CALLS edges)."""
+    svc = _service_or_exit(db)
+    _echo_nodes(svc.calls(ref), f"{ref!r} calls nothing the graph knows about")
+    svc.close()
+
+
+@app.command()
+def callers(
+    ref: str = typer.Argument(..., help="The callee: node id, qualified name, or bare name."),
+    db: str = typer.Option(DEFAULT_DB, help="Kuzu DB path."),
+) -> None:
+    """What calls this symbol (incoming CALLS edges)."""
+    svc = _service_or_exit(db)
+    _echo_nodes(svc.callers(ref), f"nothing in the graph calls {ref!r}")
+    svc.close()
+
+
+@app.command()
+def path(
+    src: str = typer.Argument(..., help="Start symbol (id or qualified name)."),
+    dst: str = typer.Argument(..., help="End symbol (id or qualified name)."),
+    db: str = typer.Option(DEFAULT_DB, help="Kuzu DB path."),
+) -> None:
+    """Shortest connection between two symbols — how does A reach B?"""
+    svc = _service_or_exit(db)
+    nodes = svc.shortest_path(src, dst)
+    if not nodes:
+        typer.echo(f"no path between {src!r} and {dst!r}")
+    for i, n in enumerate(nodes):
+        typer.echo(f"{'    ' * 0}{i + 1}. [{n['kind']}] {n['qualified_name']}")
+    svc.close()
+
+
 @app.command()
 def demo(
     path: Path = typer.Argument(..., help="Python file to run the M0 vertical slice on."),

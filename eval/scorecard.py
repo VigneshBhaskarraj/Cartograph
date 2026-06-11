@@ -29,14 +29,20 @@ CORPORA = [
     ("flask", ".corpus/flask/src/flask", "cartograph-out/flask.kuzu", "eval/flask_questions.yaml"),
     ("bridge", "eval/bridge_corpus", "cartograph-out/bridge.kuzu", "eval/bridge_questions.yaml"),
     ("ai-digest", ".corpus/ai-digest/src", "cartograph-out/aidigest.kuzu", "eval/aidigest_questions.yaml"),
+    # Held out from fusion calibration (the 2026-06-11 sweep used only the four
+    # above) — click is the generalization check. Fetch: bash eval/get_click.sh
+    ("click", ".corpus/click/src/click", "cartograph-out/click.kuzu", "eval/click_questions.yaml"),
 ]
 RETRIEVERS = ["vector", "lexical", "graph", "hybrid"]
+BASELINES = ["grep", "naive-rag"]  # external competitors (eval/baselines.py)
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--embedder", default="hash")
     ap.add_argument("--reindex", action="store_true")
+    ap.add_argument("--baselines", action="store_true",
+                    help="also score the external baselines (grep, naive-rag)")
     args = ap.parse_args()
 
     rows = []
@@ -57,12 +63,18 @@ def main() -> int:
             row = run_eval(str(ROOT / db), r, args.embedder, None,
                            questions_path=Path(ROOT / questions) if questions else None)
             rows.append((name, r, row, idx_s if r == "vector" else None))
+        if args.baselines:
+            from baselines import run_baseline
+            for b in BASELINES:
+                row = run_baseline(b, ROOT / src, str(ROOT / db),
+                                   Path(ROOT / questions) if questions else None, args.embedder)
+                rows.append((name, row["retriever"], row, None))
 
     print("\n=== SCORECARD ===")
-    hdr = f"{'corpus':<10} {'retriever':<9} {'recall@5':>8} {'recall@10':>9} {'mrr':>6} {'prec@5':>7} {'index_s':>8}"
+    hdr = f"{'corpus':<10} {'retriever':<20} {'recall@5':>8} {'recall@10':>9} {'mrr':>6} {'prec@5':>7} {'index_s':>8}"
     print(hdr); print("-" * len(hdr))
     for name, r, row, idx_s in rows:
-        print(f"{name:<10} {r:<9} {row['recall@5']:>8} {row['recall@10']:>9} {row['mrr']:>6} "
+        print(f"{name:<10} {r:<20} {row['recall@5']:>8} {row['recall@10']:>9} {row['mrr']:>6} "
               f"{row['precision@5']:>7} {('' if idx_s is None else f'{idx_s:.1f}'):>8}")
     return 0
 
