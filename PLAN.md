@@ -242,12 +242,17 @@ be demoted honestly.
 - **Verify:** `uv run python eval/fusion_sweep.py --embedder hash` (runs all present
   corpora end-to-end; mechanism check only — real numbers need `--embedder ollama`)
 
-### G2.5-3 — Bake the winner (blocked on an ollama sweep run)
-- **Files:** `cartograph/retrieve.py` (hybrid defaults), `SPEC.md` note
-- **Does:** set hybrid's default weights/rrf_k/depth to the ollama sweep winner, or
-  demote hybrid if no config qualifies.
-- **Verify:** `uv run python eval/scorecard.py --embedder ollama --reindex` shows
-  hybrid ≥ vector on mean recall@5 and mrr.
+### G2.5-3 — Bake the winner ✅ (2026-06-11 ollama sweep)
+- **Files:** `cartograph/retrieve.py` (hybrid defaults), `SPEC.md` §8, `eval/README.md`
+- **Done:** baked `weights=(3.0, 0.5, 0.5)`, `rrf_k=10`, `depth=50`. Aggregate
+  hybrid 0.909/0.961/0.735 vs vector 0.885/0.937/0.707 (r@5/r@10/mrr); wins-or-ties
+  recall@10 on all 4 corpora. The sweep's leave-one-corpus-out check flagged the
+  **mrr** edge as ai-digest-dependent, so the durable win is recall, not ranking —
+  recorded honestly in SPEC §8. Pinned by `test_hybrid_defaults_are_calibrated_constants`.
+- **Follow-up (open):** add a held-out 5th corpus and re-sweep to confirm the mrr lift
+  generalizes before claiming a ranking win publicly.
+- **Verify:** `uv run python eval/scorecard.py --embedder ollama --reindex` (hybrid ≥
+  vector on mean recall@5 and mrr; mrr margin is corpus-sensitive — see above).
 
 ---
 

@@ -75,11 +75,14 @@ uv run python eval/scorecard.py                 # offline; --embedder ollama for
 - [x] M5 — code↔schema bridge: ORM `__tablename__` → table (`MAPS_TO`) **and** raw-SQL embedded in Python → tables + `QUERIES` edges (function → table/**column**) + `JOINS` (table↔table from query JOINs); schema-bridging eval on a synthetic corpus (recall@10 **1.0**) **and the real `ai-digest` repo** (~0.86); generalized eval runner (`--questions`/`--db`)
 - [x] M6 — second language: **TypeScript/TSX** extractor via tree-sitter (`--extra ts`) — classes, interfaces, functions, arrow-const functions, methods, `extends` (INHERITS), imports, heuristic calls — into the same graph (polyglot: Python + TS in one store)
 
-**Latest eval** (httpx==0.27.2, real `nomic-embed-text` embeddings). `vector`/`hybrid`
-reach recall@10 **0.81**; the opt-in **LLM reranker** (`gemma3:12b`, blended with the
-fused order) leads top-rank quality — **MRR 0.583, recall@5 0.714, precision@5 0.40** —
-at a small recall@10/EXACT trade, so `hybrid` stays the default. Full tables, the
-offline baseline, and the reranker trade-off: [`eval/README.md`](./eval/README.md).
+**Latest eval** (real `nomic-embed-text` embeddings, 4 corpora / 51 questions). After
+calibrating fusion on the sweep (`eval/fusion_sweep.py`), **weighted `hybrid` now wins
+or ties vector on recall@10 across every corpus** and lifts the aggregate to
+**recall@5 0.909 / recall@10 0.961 / MRR 0.735** (vs vector 0.885 / 0.937 / 0.707).
+Honest caveat: the MRR edge is partly carried by one corpus, so the durable,
+generalizing win is *recall* — see [`SPEC.md`](./SPEC.md) §8. The opt-in **LLM reranker**
+(`gemma3:12b`) further leads top-rank quality. Full tables, the offline baseline, and
+the reranker trade-off: [`eval/README.md`](./eval/README.md).
 
 ## License
 [Apache License 2.0](./LICENSE) — permissive, with an explicit patent grant suited to

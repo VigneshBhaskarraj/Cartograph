@@ -48,7 +48,7 @@ GRID = [
     for rrf_k in (10, 20, 40, 60)
     for depth in (20, 50)
 ]
-CURRENT = (1.0, 1.0, 1.0, 60, 20)  # what hybrid() shipped with pre-sweep
+CURRENT = (3.0, 0.5, 0.5, 10, 50)  # the calibrated hybrid() default (2026-06-11 sweep)
 
 
 def _mean(xs: list[float]) -> float:

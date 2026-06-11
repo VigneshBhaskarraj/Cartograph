@@ -59,11 +59,19 @@ This is deliberately positioned as a fix for the structural weaknesses of cloud 
   extension is a network download, which breaks offline-by-default. Identical recall;
   HNSW remains the speed-only upgrade path. **Keyword search** is a hand-rolled BM25
   over a code-aware tokenizer, not Kuzu FTS, for the same reason.
-- **Fusion** is *weighted* RRF (`cartograph/retrieve.py`). The Gate-1 scorecard showed
-  equal-weight RRF letting two low-precision signals (graph, lexical) outvote the
-  high-precision vector signal — hybrid lost to vector-alone on every aggregate
-  metric. Weights/rrf_k are tuned only via `eval/fusion_sweep.py` evidence; if no
-  config beats vector, hybrid gets demoted rather than asserted.
+- **Fusion** is *weighted* RRF (`cartograph/retrieve.py`), calibrated on the
+  2026-06-11 ollama sweep (`eval/fusion_sweep.py`, 4 corpora / 51 questions).
+  Equal-weight RRF with `rrf_k=60` let two low-precision signals (graph, lexical)
+  outvote the high-precision vector signal — hybrid lost to vector-alone on every
+  aggregate metric (0.763/0.901/0.679 vs 0.885/0.937/0.707 for r@5/r@10/mrr). The
+  shipped default — `weights=(3.0, 0.5, 0.5)`, `rrf_k=10`, `depth=50` — is
+  vector-dominant: it wins or ties vector on recall@10 on **all four** corpora and
+  lifts aggregate r@5/mrr to 0.909/0.961/0.735. Honest caveat: the aggregate **mrr**
+  edge is partly carried by one corpus (ai-digest); leave-one-corpus-out is unstable
+  on mrr, so the robust, generalizing win here is *recall* (hybrid no longer loses to
+  vector), not a dramatic ranking gain. Because the winning region is vector-dominant,
+  the worst case of these defaults is "behaves like vector." Defaults move only via a
+  fresh sweep; a held-out 5th corpus would tighten the calibration.
 - **Symbol resolution** ships tree-sitter heuristics + opt-in Jedi receiver-type
   inference (`--resolver jedi`) instead of SCIP/stack-graphs (integration weight).
   INHERITS edges resolve by base-class name: a *unique* corpus-wide match is tagged

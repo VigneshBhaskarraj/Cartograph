@@ -53,14 +53,42 @@ done
 
 Run with `bash eval/run_local.sh` (see [`docs/local-setup.md`](../docs/local-setup.md)).
 
+> **Note (2026-06-11):** the `hybrid+rrf` row below is the *original equal-weight*
+> fusion. The multi-corpus sweep ([Fusion calibration](#fusion-calibration-2026-06-11))
+> showed it losing to vector and replaced it with a vector-dominant weighted default;
+> on httpx the weighted hybrid is **recall@5 0.762, recall@10 0.905, MRR 0.506**
+> (was 0.667 / 0.81 / 0.464). The table is kept to show the finding that motivated the fix.
+
 | retriever | recall@5 | recall@10 | precision@5 | mrr | struct | multihop | semantic | exact | cross | why |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | **vector+nomic** | 0.667 | **0.81** | **0.40** | **0.521** | 0.80 | 1.00 | 0.71 | **1.00** | 0.67 | 1.00 |
 | lexical (BM25) | 0.619 | 0.762 | 0.24 | 0.343 | 0.80 | 0.75 | 0.57 | 0.75 | 1.00 | 0.50 |
 | graph (PPR) | 0.619 | 0.762 | 0.20 | 0.313 | 0.80 | 1.00 | 0.57 | 0.50 | 1.00 | 0.50 |
-| hybrid+rrf | 0.667 | **0.81** | 0.32 | 0.464 | 0.80 | 1.00 | 0.71 | 0.75 | 1.00 | 0.50 |
+| hybrid (equal-weight rrf, superseded) | 0.667 | **0.81** | 0.32 | 0.464 | 0.80 | 1.00 | 0.71 | 0.75 | 1.00 | 0.50 |
 
 (per-mode columns are recall@10)
+
+### Fusion calibration (2026-06-11)
+`eval/fusion_sweep.py` grids 129 `(weights, rrf_k, depth)` configs over all four corpora
+(51 questions), caching each signal's ranking once per question so the grid is pure CPU.
+The equal-weight default (`(1,1,1)`, `rrf_k=60`) scored **0.763 / 0.901 / 0.679**
+(r@5 / r@10 / mrr) — below vector's **0.885 / 0.937 / 0.707**. The baked default,
+`weights=(3.0, 0.5, 0.5)`, `rrf_k=10`, `depth=50`, scores **0.909 / 0.961 / 0.735** and
+wins-or-ties vector on recall@10 on every corpus.
+
+| corpus | hybrid r@10 | vector r@10 | hybrid mrr | vector mrr |
+| --- | --- | --- | --- | --- |
+| httpx | **0.905** | 0.810 | 0.506 | 0.521 |
+| flask | 0.938 | 0.938 | 0.650 | 0.632 |
+| bridge | 1.000 | 1.000 | 0.893 | 0.905 |
+| ai-digest | 1.000 | 1.000 | **0.893** | 0.771 |
+
+**Honest caveat:** the aggregate **mrr** lift is concentrated in ai-digest; the sweep's
+leave-one-corpus-out check is unstable on mrr, so the robust win is **recall** (hybrid no
+longer loses to vector), not ranking. The winning region is vector-dominant, so the
+defaults' worst case is "behaves like vector." A held-out 5th corpus is the next step
+before claiming a ranking win publicly. Reproduce: `uv run python eval/fusion_sweep.py
+--embedder ollama --reindex`.
 
 ### What changed vs the offline embedder, and the key finding
 - **The embedder was the bottleneck.** Real embeddings lifted the vector leg hugely:

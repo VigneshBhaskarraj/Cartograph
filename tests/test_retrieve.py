@@ -140,3 +140,18 @@ def test_vector_revalidates_dim_for_lazy_embedders(tmp_path):
     with pytest.raises(ValueError, match="dim"):
         r.vector("anything")
     store.close()
+
+
+def test_hybrid_defaults_are_calibrated_constants(tmp_path):
+    """The shipped defaults are the 2026-06-11 sweep winner, not equal-weight RRF
+    (which lost to vector). Pin them so a silent revert is caught."""
+    assert Retriever.HYBRID_WEIGHTS == (3.0, 0.5, 0.5)
+    assert Retriever.HYBRID_RRF_K == 10
+    assert Retriever.HYBRID_DEPTH == 50
+    store = _store(tmp_path)
+    r = Retriever(store)
+    # Calling hybrid() with no fusion args must use those constants, not None/equal.
+    default = r.hybrid("bark sound", k=5)
+    explicit = r.hybrid("bark sound", k=5, weights=(3.0, 0.5, 0.5), rrf_k=10, depth=50)
+    assert default == explicit
+    store.close()
