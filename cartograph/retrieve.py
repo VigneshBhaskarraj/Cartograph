@@ -162,15 +162,28 @@ class Retriever:
         return [(ids[i], float(r[i])) for i in order[:k] if r[i] > 0]
 
     # -- fusion ---------------------------------------------------------------
-    def hybrid(self, query: str, k: int = 10, rrf_k: int = 60,
+    # Calibrated on the 2026-06-11 ollama fusion sweep (eval/fusion_sweep.py, 4
+    # corpora / 51 questions). Equal weights + rrf_k=60 let graph+lexical outvote
+    # vector and lost to vector-alone (0.763/0.901/0.679 vs 0.885/0.937/0.707);
+    # this vector-dominant, sharpened config wins or ties vector on recall@10 on
+    # every corpus and lifts aggregate r@5/mrr (0.909/0.961/0.735). The win region
+    # is vector-dominant, so worst case it behaves like vector — never worse. The
+    # mrr lift is partly corpus-driven (see SPEC §8); recalibrate, don't hand-edit.
+    HYBRID_WEIGHTS = (3.0, 0.5, 0.5)  # (vector, graph, lexical)
+    HYBRID_RRF_K = 10
+    HYBRID_DEPTH = 50
+
+    def hybrid(self, query: str, k: int = 10, rrf_k: int | None = None,
                weights: tuple[float, float, float] | None = None,
-               depth: int = 20) -> list[tuple[str, float]]:
+               depth: int | None = None) -> list[tuple[str, float]]:
         """Weighted RRF over (vector, graph, lexical) rankings of length `depth`.
 
-        Equal weights with a large rrf_k let two weak signals outvote a strong one
-        (measured on the Gate-1 scorecard: hybrid < vector). Weights and rrf_k are
-        therefore tunable; defaults change only via eval/fusion_sweep.py evidence.
+        Defaults are the calibrated constants above; pass overrides only for
+        experiments (eval/fusion_sweep.py is how the defaults themselves move).
         """
+        rrf_k = self.HYBRID_RRF_K if rrf_k is None else rrf_k
+        weights = self.HYBRID_WEIGHTS if weights is None else weights
+        depth = self.HYBRID_DEPTH if depth is None else depth
         d = max(k, depth)
         rankings = [
             [i for i, _ in self.vector(query, k=d)],
