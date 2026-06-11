@@ -43,7 +43,7 @@ CORPUS = {
     "httpx": (ROOT / ".corpus/httpx", ROOT / "cartograph-out/httpx.kuzu"),
     "flask": (ROOT / ".corpus/flask/src/flask", ROOT / "cartograph-out/flask.kuzu"),
 }
-MAX_TURNS = 10
+MAX_TURNS = 8  # matches the pilot's command cap
 OBS_LIMIT = 4000  # chars per tool observation
 
 
@@ -160,8 +160,35 @@ class OllamaChat:
                 f"`ollama pull {self.model}`.") from e
 
 
-_TOOL_RE = re.compile(r"TOOL\s+(\w+)\s*(\{.*?\})", re.DOTALL)
-_ANSWER_RE = re.compile(r"ANSWER[:\s]+(.+)", re.DOTALL)
+# Line-anchored: a reply mentioning "ANSWER" mid-sentence before a TOOL line must
+# not end the episode (and would even false-pass if the rationale named the gold).
+# Whichever directive line appears FIRST in the reply wins.
+_TOOL_RE = re.compile(r"^\s*TOOL\s+(\w+)\s*(\{.*)$", re.MULTILINE)
+_ANSWER_RE = re.compile(r"^\s*ANSWER[:\s]+(.+)$", re.MULTILINE)
+
+
+def _parse_reply(reply: str):
+    """-> ("answer", text) | ("tool", name, args) | (None,)"""
+    t, a = _TOOL_RE.search(reply), _ANSWER_RE.search(reply)
+    if a is not None and (t is None or a.start() < t.start()):
+        return ("answer", a.group(1).strip())
+    if t is not None:
+        try:  # raw_decode tolerates trailing text and braces inside strings
+            args, _ = json.JSONDecoder().raw_decode(t.group(2).strip())
+        except json.JSONDecodeError:
+            args = {}
+        return ("tool", t.group(1), args if isinstance(args, dict) else {})
+    return (None,)
+
+
+def _graded(answer: str, gold: list[str]) -> bool:
+    """Word-boundary identifier match; case-sensitive when the gold itself is
+    capitalized (so prose 'cookies' can't match the class `Cookies`)."""
+    for g in gold:
+        flags = 0 if g[:1].isupper() else re.IGNORECASE
+        if re.search(rf"(?<![A-Za-z0-9_]){re.escape(g)}(?![A-Za-z0-9_])", answer, flags):
+            return True
+    return False
 
 
 def system_prompt(tools) -> str:
@@ -181,28 +208,25 @@ def run_task(task: dict, tools, model) -> dict:
     chars = sum(len(m["content"]) for m in messages)
     calls, answer = 0, ""
     t0 = time.time()
-    for _ in range(MAX_TURNS + 1):
+    for _ in range(MAX_TURNS + 2):
         reply = model.chat(messages)
         chars += len(reply)
         messages.append({"role": "assistant", "content": reply})
-        m = _ANSWER_RE.search(reply)
-        if m:
-            answer = m.group(1).strip()
+        parsed = _parse_reply(reply)
+        if parsed[0] == "answer":
+            answer = parsed[1]
             break
-        t = _TOOL_RE.search(reply)
-        if t and calls < MAX_TURNS:
+        if parsed[0] == "tool" and calls < MAX_TURNS:
             calls += 1
-            try:
-                args = json.loads(t.group(2))
-            except json.JSONDecodeError:
-                args = {}
-            obs = tools.call(t.group(1), args)[:OBS_LIMIT]
-            messages.append({"role": "user", "content": f"RESULT:\n{obs}"})
-            chars += len(obs)
+            obs = tools.call(parsed[1], parsed[2])[:OBS_LIMIT]
+            nudge = f"RESULT:\n{obs}"
+        elif calls >= MAX_TURNS:
+            nudge = "Tool budget exhausted. Reply with exactly one ANSWER line now."
         else:
-            messages.append({"role": "user", "content":
-                             "Reply with exactly one TOOL line or one ANSWER line."})
-    success = any(g.lower() in answer.lower() for g in task["gold"])
+            nudge = "Reply with exactly one TOOL line or one ANSWER line."
+        messages.append({"role": "user", "content": nudge})
+        chars += len(nudge)
+    success = _graded(answer, task["gold"])
     return {"id": task["id"], "corpus": task["corpus"], "mode": task["mode"],
             "success": success, "tool_calls": calls, "chars": chars,
             "seconds": round(time.time() - t0, 1), "answer": answer[:200]}

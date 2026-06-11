@@ -202,8 +202,8 @@ def run_baseline(name: str, src: Path, db: str, questions_path: Path | None,
     per_mode: dict[str, list[float]] = {m: [] for m in MODE_COLS}
     for q in questions:
         gold = gold_ids(q["anchors"], corpus.nodes)
-        if not gold:
-            continue
+        # zero-gold questions score 0, matching run_eval — skipping them here would
+        # skew baseline-vs-retriever comparison if an anchor ever broke
         ranked = rank(q["question"])
         hit10 = recall_at_k(ranked, gold, 10)
         r5.append(recall_at_k(ranked, gold, 5))

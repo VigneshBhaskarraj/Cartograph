@@ -1,0 +1,24 @@
+{"task": 1, "condition": "grep", "success": true, "commands_reported": 7, "answer": "Client._send_handling_auth"}
+{"task": 1, "condition": "cartograph", "success": true, "commands_reported": 3, "answer": "httpx._client.Client._send_handling_auth"}
+{"task": 2, "condition": "grep", "success": true, "commands_reported": 8, "answer": "httpx._client.BaseClient._redirect_method"}
+{"task": 2, "condition": "cartograph", "success": true, "commands_reported": 3, "answer": "httpx._client.BaseClient._redirect_method"}
+{"task": 3, "condition": "grep", "success": true, "commands_reported": 5, "answer": "httpx._decoders.ContentDecoder"}
+{"task": 3, "condition": "cartograph", "success": true, "commands_reported": 4, "answer": "httpx._decoders.ContentDecoder"}
+{"task": 4, "condition": "grep", "success": true, "commands_reported": 1, "answer": "_decoders.py"}
+{"task": 4, "condition": "cartograph", "success": true, "commands_reported": 1, "answer": "httpx._decoders"}
+{"task": 5, "condition": "grep", "success": true, "commands_reported": 8, "answer": "Transport.handle_request", "note": "passes under post-hoc gold widening disclosed in tasks.yaml/RESULTS.md"}
+{"task": 5, "condition": "cartograph", "success": true, "commands_reported": 6, "answer": "httpx._client.Client._send_single_request"}
+{"task": 6, "condition": "grep", "success": true, "commands_reported": 5, "answer": "httpx.Cookies"}
+{"task": 6, "condition": "cartograph", "success": true, "commands_reported": 2, "answer": "httpx._models.Cookies"}
+{"task": 7, "condition": "grep", "success": true, "commands_reported": 5, "answer": "httpx.NetRCAuth"}
+{"task": 7, "condition": "cartograph", "success": true, "commands_reported": 2, "answer": "httpx._auth.NetRCAuth"}
+{"task": 8, "condition": "grep", "success": true, "commands_reported": 6, "answer": "BaseClient._build_redirect_request"}
+{"task": 8, "condition": "cartograph", "success": true, "commands_reported": 2, "answer": "httpx._client.BaseClient._build_redirect_request"}
+{"task": 9, "condition": "grep", "success": true, "commands_reported": 5, "answer": "Flask.make_response"}
+{"task": 9, "condition": "cartograph", "success": true, "commands_reported": 2, "answer": "Flask.make_response"}
+{"task": 10, "condition": "grep", "success": true, "commands_reported": 5, "answer": "flask.app.Flask.handle_user_exception"}
+{"task": 10, "condition": "cartograph", "success": true, "commands_reported": 4, "answer": "flask.app.Flask.handle_user_exception"}
+{"task": 11, "condition": "grep", "success": true, "commands_reported": 1, "answer": "flask/sansio/blueprints.py"}
+{"task": 11, "condition": "cartograph", "success": true, "commands_reported": 2, "answer": "flask/sansio/blueprints.py"}
+{"task": 12, "condition": "grep", "success": true, "commands_reported": 6, "answer": "Flask.url_for"}
+{"task": 12, "condition": "cartograph", "success": true, "commands_reported": 5, "answer": "Flask.url_for"}

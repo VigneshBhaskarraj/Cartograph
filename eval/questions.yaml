@@ -102,7 +102,7 @@
   mode: MULTIHOP+SEMANTIC
   anchors: ["Cookies.extract_cookies", "Client._send_single_request"]
 - id: 26
-  question: "How does httpx pick the character encoding when turning a response body into text?"
+  question: "When a server doesn't say how its response bytes should be read as a string, where does httpx work that out?"
   mode: SEMANTIC
   anchors: ["Response.charset_encoding", "TextDecoder"]
 - id: 27

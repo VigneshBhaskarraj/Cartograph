@@ -169,6 +169,15 @@ def resolve(
     svc.close()
 
 
+def _known_ref_or_exit(svc, ref: str) -> None:
+    """An unknown symbol must error, not read as 'known symbol, empty result' —
+    agents act on that difference."""
+    if svc.get_node(ref) is None:
+        typer.echo(f"no node matches {ref!r} (try `cartograph resolve`)", err=True)
+        svc.close()
+        raise typer.Exit(1)
+
+
 @app.command()
 def calls(
     ref: str = typer.Argument(..., help="The caller: node id, qualified name, or bare name."),
@@ -176,6 +185,7 @@ def calls(
 ) -> None:
     """What this symbol calls (outgoing CALLS edges)."""
     svc = _service_or_exit(db)
+    _known_ref_or_exit(svc, ref)
     _echo_nodes(svc.calls(ref), f"{ref!r} calls nothing the graph knows about")
     svc.close()
 
@@ -187,6 +197,7 @@ def callers(
 ) -> None:
     """What calls this symbol (incoming CALLS edges)."""
     svc = _service_or_exit(db)
+    _known_ref_or_exit(svc, ref)
     _echo_nodes(svc.callers(ref), f"nothing in the graph calls {ref!r}")
     svc.close()
 
@@ -203,7 +214,7 @@ def path(
     if not nodes:
         typer.echo(f"no path between {src!r} and {dst!r}")
     for i, n in enumerate(nodes):
-        typer.echo(f"{'    ' * 0}{i + 1}. [{n['kind']}] {n['qualified_name']}")
+        typer.echo(f"{i + 1}. [{n['kind']}] {n['qualified_name']}")
     svc.close()
 
 

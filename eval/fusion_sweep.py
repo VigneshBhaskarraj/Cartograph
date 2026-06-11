@@ -55,10 +55,19 @@ def _mean(xs: list[float]) -> float:
     return sum(xs) / len(xs) if xs else 0.0
 
 
-def collect_rankings(embedder_name: str, reindex: bool) -> dict[str, list[dict]]:
+# click is HELD OUT: it must never participate in winner selection — it exists to
+# validate that a chosen config generalizes. Tuning on it would silently destroy
+# the held-out property the corpus was created for.
+HELD_OUT = {"click"}
+TUNE_CORPORA = [c for c in CORPORA if c[0] not in HELD_OUT]
+HELD_OUT_CORPORA = [c for c in CORPORA if c[0] in HELD_OUT]
+
+
+def collect_rankings(embedder_name: str, reindex: bool,
+                     corpora_spec=None) -> dict[str, list[dict]]:
     """Per corpus: one entry per question with gold ids and depth-50 rankings."""
     out: dict[str, list[dict]] = {}
-    for name, src, db, questions in CORPORA:
+    for name, src, db, questions in (TUNE_CORPORA if corpora_spec is None else corpora_spec):
         if not (ROOT / src).exists():
             print(f"skip {name}: source {src} not present")
             continue
@@ -180,6 +189,17 @@ def main() -> int:
             print("  leave-one-corpus-out: " + (
                 "stable — qualifies with any corpus held out" if loco_ok else
                 "UNSTABLE — the pick depends on one corpus; add a held-out corpus before baking defaults"))
+        # Held-out validation: score the WINNER (chosen above, untouched by this
+        # data) on the held-out corpora. Validation only — never selection.
+        held = collect_rankings(args.embedder, args.reindex, corpora_spec=HELD_OUT_CORPORA)
+        for n, rows in held.items():
+            h5, h10, hm = score_ranked(
+                rows, lambda r: fused_ranking(r, wv, wg, wl, rrf_k, depth))
+            v5, v10, vm = score_ranked(rows, lambda r: r["vector"][:K])
+            ok = h5 >= v5 and hm >= vm
+            print(f"  HELD-OUT {n}: hybrid r@5 {h5:.3f} (vec {v5:.3f})  "
+                  f"r@10 {h10:.3f} (vec {v10:.3f})  mrr {hm:.3f} (vec {vm:.3f})  "
+                  f"-> {'generalizes' if ok else 'DOES NOT generalize — do not bake this config'}")
     else:
         print("NO config beats vector on mean r@5 + mrr. The honest move is to demote")
         print("hybrid to vector-primary and update SPEC.md — do not ship a fusion that")

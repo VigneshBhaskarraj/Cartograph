@@ -15,13 +15,18 @@ context).
   - `cartograph`: the `cartograph` CLI only — `query` (hybrid retrieval), `node`,
     `resolve`, `calls`, `callers`, `path`. No file access at all.
 - **Driver (pilot):** isolated Claude Code subagents (claude-haiku-4-5), one per
-  task per condition, temperature defaults, no shared context. The offline-
-  reproducible harness (`run_bench.py`, any local Ollama chat model, zero egress)
-  implements the identical protocol for independent replication.
-- **Grading:** final answer must contain a gold symbol (case-insensitive). One task's
-  gold was widened post-hoc (task 5: `handle_request` accepted alongside
-  `_send_single_request`) because the baseline's answer was a defensible reading —
-  grading generosity went **to the baseline**.
+  task per condition, temperature defaults, no shared context. Per-task raw data:
+  [`pilot_results.jsonl`](./pilot_results.jsonl). The offline harness
+  (`run_bench.py`, any local Ollama chat model, zero egress) implements the same
+  protocol shape (line-oriented TOOL/ANSWER loop, 8-command cap) for independent
+  replication; the pilot's tool surface was the equivalent shell commands
+  (`grep`/`sed`/`ls`-`find` vs the `cartograph` CLI).
+- **Grading:** the final answer must contain a gold symbol on identifier word
+  boundaries (case-sensitive for capitalized golds, so prose "cookies" can't match
+  the class `Cookies`). One task's gold was widened post-hoc (task 5:
+  `handle_request` accepted alongside `_send_single_request`) because the
+  baseline's answer was a defensible reading — grading generosity went **to the
+  baseline**.
 
 ## Results (n = 12 tasks per condition)
 
