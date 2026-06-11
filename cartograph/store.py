@@ -15,6 +15,10 @@ import kuzu
 from .model import EDGE_TYPES, Edge, Graph, Node
 
 DEFAULT_DIM = 768
+# Bump when the graph layout changes incompatibly (new required tables/columns);
+# readers compare it (and the table set) to fail with "re-run cartograph index"
+# instead of a mid-query crash.
+SCHEMA_VERSION = "1"
 
 
 def schema_ddl(dim: int = DEFAULT_DIM) -> list[str]:
@@ -45,11 +49,11 @@ def schema_ddl(dim: int = DEFAULT_DIM) -> list[str]:
 
 
 class Store:
-    def __init__(self, db_path: str | Path):
+    def __init__(self, db_path: str | Path, read_only: bool = False):
         self.path = Path(db_path)
         if self.path.parent and not self.path.parent.exists():
             self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.db = kuzu.Database(str(self.path))
+        self.db = kuzu.Database(str(self.path), read_only=read_only)
         self.conn = kuzu.Connection(self.db)
 
     def close(self) -> None:
@@ -60,7 +64,16 @@ class Store:
     def create(cls, db_path: str | Path, dim: int = DEFAULT_DIM, overwrite: bool = False) -> "Store":
         p = Path(db_path)
         if overwrite and p.exists():
+            # Deleting whatever --db points at would let a typo rmtree a user
+            # directory; only paths that are plainly a graph DB may be replaced.
+            if p.suffix != ".kuzu":
+                raise ValueError(
+                    f"refusing to overwrite {p}: not a .kuzu database path — "
+                    "delete it manually if that is really what you want")
             shutil.rmtree(p) if p.is_dir() else p.unlink()
+            wal = p.with_name(p.name + ".wal")  # stale WAL would be replayed into the new DB
+            if wal.exists():
+                wal.unlink()
         store = cls(p)
         store.create_schema(dim)
         return store

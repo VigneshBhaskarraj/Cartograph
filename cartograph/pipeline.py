@@ -9,13 +9,26 @@ from .cache import EmbeddingCache
 from .embed import get_embedder
 from .extract import extract_paths
 from .model import Graph
-from .store import DEFAULT_DIM, Store
+from .store import DEFAULT_DIM, SCHEMA_VERSION, Store
+
+
+# Indexing a project root must not sweep up its virtualenv, vendored deps, or VCS
+# internals — embedding a .venv costs hours of Ollama time and poisons retrieval.
+SKIP_DIRS = {"__pycache__", ".git", ".hg", ".svn", ".venv", "venv", ".env", "env",
+             "node_modules", ".tox", ".nox", ".mypy_cache", ".pytest_cache", ".ruff_cache",
+             "dist", "build", ".eggs", "site-packages"}
 
 
 def _files(path: Path, suffix: str) -> list[Path]:
     if path.is_file():
         return [path] if path.suffix == suffix else []
-    return sorted(p for p in path.rglob(f"*{suffix}") if "__pycache__" not in p.parts)
+    out = []
+    for p in path.rglob(f"*{suffix}"):
+        rel_parts = p.relative_to(path).parts[:-1]  # dirs below the root only
+        if any(part in SKIP_DIRS or part.startswith(".") for part in rel_parts):
+            continue
+        out.append(p)
+    return sorted(out)
 
 
 def _file_digests(path: Path) -> dict[str, str]:
@@ -190,6 +203,7 @@ def index_path(path: Path, db_path: Path, dim: int = DEFAULT_DIM, embedder=None,
     store.set_meta("embedder_backend", backend)
     store.set_meta("embedder_model", model)
     store.set_meta("embedding_dim", str(actual_dim))
+    store.set_meta("schema_version", SCHEMA_VERSION)
     # Per-file content hashes, so `update` can detect what changed without re-embedding.
     for rel, sha in _file_digests(path).items():
         store.set_meta(f"file:{rel}", sha)
@@ -253,6 +267,7 @@ def update_index(path: Path, db_path: Path, dim: int = DEFAULT_DIM, embedder=Non
     store.set_meta("embedder_backend", backend)
     store.set_meta("embedder_model", model)
     store.set_meta("embedding_dim", str(actual_dim))
+    store.set_meta("schema_version", SCHEMA_VERSION)
     for rel, sha in _file_digests(path).items():
         store.set_meta(f"file:{rel}", sha)
     for rel in delta["deleted"]:

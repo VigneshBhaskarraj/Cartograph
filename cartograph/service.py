@@ -12,8 +12,28 @@ import os
 from pathlib import Path
 
 from .embed import get_embedder
+from .model import EDGE_TYPES
 from .retrieve import Retriever
 from .store import DEFAULT_DIM, Store
+
+REQUIRED_TABLES = {"CodeNode", *EDGE_TYPES}
+
+
+def open_graph(db_path: str | Path, read_only: bool = True) -> Store:
+    """Open an existing graph with friendly failures: a missing path must not
+    silently create an empty DB, and a graph built by an older Cartograph (missing
+    rel tables) must say so instead of crashing mid-query."""
+    p = Path(db_path)
+    if not p.exists():
+        raise FileNotFoundError(f"no graph at {p}; run `cartograph index <path> --db {p}` first")
+    store = Store(p, read_only=read_only)
+    missing = REQUIRED_TABLES - store.table_names()
+    if missing:
+        store.close()
+        raise RuntimeError(
+            f"graph at {p} was built by an older Cartograph (missing tables: "
+            f"{', '.join(sorted(missing))}); re-run `cartograph index`")
+    return store
 
 
 def embedder_from_store(store: Store):
@@ -31,9 +51,9 @@ class CartographService:
     """Opens a graph once and answers structural/semantic queries."""
 
     def __init__(self, db_path: str | Path, embedder=None, reranker=None):
-        if not Path(db_path).exists():
-            raise FileNotFoundError(f"no graph at {db_path}; run `cartograph index` first")
-        self.store = Store(db_path)
+        # Read-only: queries never write, and it lets a reindex in another process
+        # proceed without this server holding a write lock.
+        self.store = open_graph(db_path, read_only=True)
         if embedder is None:
             embedder = embedder_from_store(self.store)
         # Build a reranker from env (CARTOGRAPH_RERANKER=ollama, CARTOGRAPH_RERANK_MODEL=...)

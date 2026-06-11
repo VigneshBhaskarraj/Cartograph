@@ -62,3 +62,8 @@ it'll call `query`/`neighbors`/`shortest_path` against the graph.
 - The server only ever reads the graph; it never re-reads source files at query time.
 - `serve` writes nothing to stdout except the MCP protocol (stdio-safe).
 - `rerank` mode becomes available automatically if the M2 reranker is present.
+- Use **absolute** `--db` paths in agent configs — the server resolves relative paths
+  against its own working directory, not your project's.
+- **Re-indexing while serving:** the server opens the graph read-only and keeps its
+  indexes in RAM; it will not see a reindex. Re-index to a fresh `--db` path and
+  restart the server (or stop it first) — don't overwrite the DB it has open.

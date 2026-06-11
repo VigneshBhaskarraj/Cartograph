@@ -22,12 +22,23 @@ import urllib.request
 
 from .store import DEFAULT_DIM
 
-def _warn_if_remote(host: str) -> None:
-    """Guard the zero-egress promise: warn if Ollama isn't on loopback."""
-    if not any(h in host for h in ("127.0.0.1", "localhost", "0.0.0.0", "::1")):
+def _check_loopback(host: str) -> None:
+    """Enforce the zero-egress promise: refuse a non-loopback Ollama host unless
+    explicitly allowed (CARTOGRAPH_ALLOW_REMOTE_OLLAMA=1). Exact hostname compare —
+    a substring check would pass lookalikes such as localhost.evil.com."""
+    from urllib.parse import urlsplit
+    target = host if "://" in host else f"//{host}"
+    hostname = (urlsplit(target).hostname or "").lower()
+    if hostname in ("127.0.0.1", "localhost", "0.0.0.0", "::1"):
+        return
+    if os.environ.get("CARTOGRAPH_ALLOW_REMOTE_OLLAMA") == "1":
         import warnings
         warnings.warn(f"OLLAMA_HOST={host} is not loopback — code/queries leave this machine.",
                       stacklevel=3)
+        return
+    raise RuntimeError(
+        f"OLLAMA_HOST={host} is not loopback; sending code there breaks the zero-egress "
+        "default. Set CARTOGRAPH_ALLOW_REMOTE_OLLAMA=1 to allow it explicitly.")
 
 
 _TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9]*")
@@ -77,7 +88,7 @@ class OllamaEmbedder:
         self.name = f"ollama:{model}"
         self.model = model
         self.host = (host or os.environ.get("OLLAMA_HOST") or "http://127.0.0.1:11434").rstrip("/")
-        _warn_if_remote(self.host)
+        _check_loopback(self.host)
         self.dim = dim
 
     def embed(self, text: str) -> list[float]:
@@ -85,8 +96,15 @@ class OllamaEmbedder:
         req = urllib.request.Request(
             f"{self.host}/api/embeddings", data=payload, headers={"Content-Type": "application/json"}
         )
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            data = json.loads(resp.read())
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                data = json.loads(resp.read())
+        except OSError as e:  # URLError covers refused/timeout/DNS; HTTPError covers missing model
+            raise RuntimeError(
+                f"Ollama not reachable at {self.host} ({e}). Install it from https://ollama.com, "
+                f"run `ollama serve`, and `ollama pull {self.model}` — or omit the embedder "
+                "flag to use the offline default."
+            ) from e
         return data["embedding"]
 
     def embed_batch(self, texts: list[str]) -> list[list[float]]:

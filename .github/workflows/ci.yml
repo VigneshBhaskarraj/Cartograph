@@ -1,0 +1,22 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install (all extras)
+        run: uv sync --all-extras
+      - name: Tests (offline, deterministic)
+        run: uv run pytest -q
+      - name: Build wheel + sdist
+        run: uv build
