@@ -287,8 +287,11 @@ Closing the three publish-blockers: no external baseline, no agent benchmark,
   (needs local Ollama; pilot method + numbers in RESULTS.md).
 
 ### G3 open follow-ups
-- Ollama scorecard + sweep-verdict on the expanded 89-question set, esp. the
-  held-out click corpus (runs on a machine with Ollama).
+- ~~Ollama scorecard + sweep-verdict on the expanded 89-question set~~ ✅ 2026-06-11:
+  hybrid 0.882/0.952/0.744 vs vector 0.850/0.927/0.714 vs grep 0.535/0.670/0.362
+  (means, 5 corpora); **held-out click: generalizes** (hybrid ≥ vector on all three).
+  Sweep's near-tied alternative config NOT adopted — selecting on the held-out
+  corpus would burn its held-out status; revisit only with a fresh held-out corpus.
 - Scale agent bench beyond n=12 and run with a weaker local model, where accuracy
   (not just efficiency) gaps are expected to appear.
 
