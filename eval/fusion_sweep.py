@@ -58,7 +58,7 @@ def _mean(xs: list[float]) -> float:
 # click is HELD OUT: it must never participate in winner selection — it exists to
 # validate that a chosen config generalizes. Tuning on it would silently destroy
 # the held-out property the corpus was created for.
-HELD_OUT = {"click"}
+HELD_OUT = {"click", "petclinic"}  # both post-calibration corpora: validation only
 TUNE_CORPORA = [c for c in CORPORA if c[0] not in HELD_OUT]
 HELD_OUT_CORPORA = [c for c in CORPORA if c[0] in HELD_OUT]
 

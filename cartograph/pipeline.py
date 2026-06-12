@@ -45,7 +45,7 @@ def _file_digests(path: Path) -> dict[str, str]:
     """{repo-relative path: sha256(content)} for every indexed source file."""
     pkg_parent = path.parent
     out: dict[str, str] = {}
-    for f in (f for suf in (".py", ".sql", *TS_JS_SUFFIXES) for f in _files(path, suf)):
+    for f in (f for suf in (".py", ".sql", ".java", ".go", *TS_JS_SUFFIXES) for f in _files(path, suf)):
         rel = f.relative_to(pkg_parent).as_posix() if f.is_relative_to(pkg_parent) else f.name
         out[rel] = hashlib.sha256(f.read_bytes()).hexdigest()
     return out
@@ -58,11 +58,29 @@ def build_graph(path: Path, resolver: str = "heuristic") -> Graph:
     if sql_files:
         try:
             from .sql_extract import extract_sql_paths
-            schema = extract_sql_paths(sql_files, root=path)
+            schema = _dedup_schema(extract_sql_paths(sql_files, root=path))
             graph.nodes.extend(schema.nodes)
             graph.edges.extend(schema.edges)
         except ModuleNotFoundError:
             pass  # sqlglot not installed; skip SQL (install with `--extra sql`)
+    java_files = _files(path, ".java")
+    if java_files:
+        try:
+            from .java_extract import extract_java_paths
+            jg = extract_java_paths(java_files, root=path)
+            graph.nodes.extend(jg.nodes)
+            graph.edges.extend(jg.edges)
+        except ModuleNotFoundError:
+            pass  # tree-sitter-java not installed; skip (install with `--extra java`)
+    go_files = _files(path, ".go")
+    if go_files:
+        try:
+            from .go_extract import extract_go_paths
+            gg = extract_go_paths(go_files, root=path)
+            graph.nodes.extend(gg.nodes)
+            graph.edges.extend(gg.edges)
+        except ModuleNotFoundError:
+            pass  # tree-sitter-go not installed; skip (install with `--extra go`)
     ts_files = [f for suf in TS_JS_SUFFIXES for f in _files(path, suf)]
     if ts_files:
         try:
@@ -77,6 +95,34 @@ def build_graph(path: Path, resolver: str = "heuristic") -> Graph:
     if not graph.nodes:
         raise FileNotFoundError(f"no Python or SQL files under {path}")
     return graph
+
+
+def _dedup_schema(schema: Graph) -> Graph:
+    """The same logical table often appears in several .sql files (one schema per
+    DB dialect — spring-petclinic ships h2+mysql+postgres). Duplicate table/column
+    nodes split the code<->data bridge: MAPS_TO attaches to one copy while a query
+    resolves the other. Keep the first node per (kind, qualified_name) and remap
+    edges onto the keepers."""
+    keep: dict[tuple[str, str], str] = {}
+    remap: dict[str, str] = {}
+    nodes = []
+    for n in schema.nodes:
+        key = (n.kind, n.qualified_name)
+        if key in keep:
+            remap[n.id] = keep[key]
+        else:
+            keep[key] = n.id
+            nodes.append(n)
+    edges, seen = [], set()
+    for e in schema.edges:
+        src, dst = remap.get(e.src, e.src), remap.get(e.dst, e.dst)
+        if src == dst or (e.type, src, dst) in seen:
+            continue
+        seen.add((e.type, src, dst))
+        e.src, e.dst = src, dst
+        edges.append(e)
+    schema.nodes, schema.edges = nodes, edges
+    return schema
 
 
 def _extract_embedded_sql(graph: Graph) -> None:
@@ -168,9 +214,19 @@ def _bridge_models_to_tables(graph: Graph) -> None:
         if not tn:
             continue
         tgt = by_qual.get(tn) or by_name.get(tn.rsplit(".", 1)[-1])
-        if tgt is not None and ("MAPS_TO", n.id, tgt.id) not in seen:
+        if tgt is None:
+            continue
+        if ("MAPS_TO", n.id, tgt.id) not in seen:
             seen.add(("MAPS_TO", n.id, tgt.id))
             graph.edges.append(Edge("MAPS_TO", n.id, tgt.id, EXTRACTED))
+        # Column-level mapping (JPA @Column): entity class -> table.column nodes.
+        if n.extra.get("columns"):
+            cols = {c.qualified_name: c for c in graph.nodes if c.kind == "column"}
+            for col in n.extra["columns"]:
+                cn = cols.get(f"{tgt.name}.{col}") or cols.get(f"{tgt.qualified_name}.{col}")
+                if cn is not None and ("MAPS_TO", n.id, cn.id) not in seen:
+                    seen.add(("MAPS_TO", n.id, cn.id))
+                    graph.edges.append(Edge("MAPS_TO", n.id, cn.id, EXTRACTED))
 
 
 def embed_graph(graph: Graph, embedder=None, cache: EmbeddingCache | None = None) -> tuple[int, int]:

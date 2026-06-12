@@ -43,6 +43,12 @@ ts = [
     "tree-sitter-javascript>=0.25.0",
     "tree-sitter-typescript>=0.23",
 ]
+java = [
+    "tree-sitter-java>=0.23.5",
+]
+go = [
+    "tree-sitter-go>=0.25.0",
+]
 
 [build-system]
 requires = ["hatchling"]

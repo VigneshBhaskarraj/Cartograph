@@ -32,6 +32,9 @@ CORPORA = [
     # Held out from fusion calibration (the 2026-06-11 sweep used only the four
     # above) — click is the generalization check. Fetch: bash eval/get_click.sh
     ("click", ".corpus/click/src/click", "cartograph-out/click.kuzu", "eval/click_questions.yaml"),
+    # Java corpus: canonical JPA entities + multi-dialect schema.sql (code<->data
+    # bridge under eval). Fetch: bash eval/get_petclinic.sh
+    ("petclinic", ".corpus/petclinic/src/main", "cartograph-out/petclinic.kuzu", "eval/petclinic_questions.yaml"),
 ]
 RETRIEVERS = ["vector", "lexical", "graph", "hybrid"]
 BASELINES = ["grep", "naive-rag"]  # external competitors (eval/baselines.py)

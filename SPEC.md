@@ -42,7 +42,11 @@ This is deliberately positioned as a fix for the structural weaknesses of cloud 
 - MIT-compatible dependencies only.
 
 ## 6. Non-goals
-- No 28-language breadth. Python (+ SQL schema) first; architecture should make adding a language easy later, but we don't build that now.
+- No 28-language breadth. ~~Python (+ SQL schema) first.~~ *Amended for release
+  (2026-06-12):* the launch set is **Python, JavaScript/TypeScript, Java, Go (+ SQL)**
+  — enough coverage that strangers can test on their own repos. Each extractor is a
+  self-contained module feeding the same graph model. Further languages are
+  demand-driven only; breadth without users is still a non-goal.
 - ~~No browser visualization for the MVP.~~ *Amended post-MVP (2026-06-12):*
   `cartograph viz` ships as a **viewer/demo artifact only** — a static, offline,
   self-contained HTML export. The retrieval engine never depends on it, and it makes
