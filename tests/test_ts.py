@@ -137,3 +137,74 @@ def test_js_this_and_computed_assignments_skipped(tmp_path):
     names = {n.name for n in g.nodes if n.kind in ("function", "method")}
     assert "Ctor" in names
     assert "x" not in names and "dyn" not in names  # junk paths skipped
+
+
+def test_generic_type_args_are_not_inheritance(tmp_path):
+    """G5-C1: `extends Component<Props, State>` names ONE base. The old walk
+    harvested Props and State from type_arguments too — and because each name
+    was unique, every bogus edge got EXTRACTED confidence."""
+    src = tmp_path / "view.ts"
+    src.write_text(
+        "interface Props { x: number }\n"
+        "interface State { y: number }\n"
+        "class Component<P, S> { }\n"
+        "class MyView extends Component<Props, State> { }\n"
+        "class Impl implements Props { }\n"
+    )
+    g = build_graph(src)
+    by_id = {n.id: n for n in g.nodes}
+    inh = {(by_id[e.src].name, by_id[e.dst].name) for e in g.edges if e.type == "INHERITS"}
+    assert ("MyView", "Component") in inh
+    assert ("MyView", "Props") not in inh and ("MyView", "State") not in inh
+    assert ("Impl", "Props") in inh  # implements still works
+
+
+def test_arrow_callback_calls_are_captured(tmp_path):
+    """G5-C4: `items.forEach(i => doWork())` produced NO CALLS edge while the
+    equivalent function-expression callback did — arrows are the dominant
+    modern style, so this was a major recall hole."""
+    src = tmp_path / "m.ts"
+    src.write_text(
+        "function doWork(i: number) { return i; }\n"
+        "function run(items: number[]) {\n"
+        "    items.forEach(i => doWork(i));\n"
+        "}\n"
+    )
+    g = build_graph(src)
+    by_id = {n.id: n for n in g.nodes}
+    calls = {(by_id[e.src].name, by_id[e.dst].name) for e in g.edges if e.type == "CALLS"}
+    assert ("run", "doWork") in calls
+
+
+def test_class_field_arrow_methods_extracted(tmp_path):
+    """G5-C4: `handleClick = () => {…}` (the React handler idiom) produced no
+    node and lost its calls."""
+    src = tmp_path / "view.ts"
+    src.write_text(
+        "class View {\n"
+        "    render() { return 1; }\n"
+        "    handleClick = () => { this.render(); };\n"
+        "}\n"
+    )
+    g = build_graph(src)
+    by_id = {n.id: n for n in g.nodes}
+    kinds = {(n.name, n.kind) for n in g.nodes}
+    assert ("handleClick", "method") in kinds
+    calls = {(by_id[e.src].name, by_id[e.dst].name) for e in g.edges if e.type == "CALLS"}
+    assert ("handleClick", "render") in calls
+
+
+def test_nested_decls_in_assigned_fn_do_not_leak_to_module_scope(tmp_path):
+    """G5-C4: `exports.mw = function () { function inner() {} }` minted a
+    module-level `module.inner` function — wrong scope, phantom qual."""
+    src = tmp_path / "mw.js"
+    src.write_text(
+        "exports.mw = function () {\n"
+        "    function inner() { return 1; }\n"
+        "    return inner;\n"
+        "};\n"
+    )
+    g = build_graph(src)
+    quals = {n.qualified_name for n in g.nodes if n.kind == "function"}
+    assert "mw.mw" in quals
+    assert "mw.inner" not in quals  # the scope leak

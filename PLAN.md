@@ -394,6 +394,12 @@ with before/after scorecard numbers (CLAUDE.md directive 3), not just passing te
 
 ### Track C — Extractor correctness
 
+> **C1–C4 eval verdict (2026-06-12, hash, 6 corpora):** zero quality regression on
+> every corpus/retriever; petclinic graph mrr 0.386 → 0.400 (C3's same-package
+> tier removed cross-package false CALLS). C1/C4 deltas are zero by construction —
+> **no TS corpus exists in the eval set** (gap recorded below); covered by unit
+> tests. C2 moves tags, not edges-used-in-scoring, so retrieval is unchanged.
+
 ### G5-C1 — TS heritage: stop harvesting generic type args **[eval-first]**
 - **Files:** `cartograph/ts_extract.py`, `tests/test_ts.py`
 - **Does:** `class A extends Component<Props, State>` emits INHERITS to `Component`,

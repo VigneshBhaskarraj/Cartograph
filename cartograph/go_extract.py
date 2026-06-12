@@ -190,6 +190,10 @@ def extract_go_paths(paths: list[Path], root: Path) -> Graph:
         if n.kind in ("function", "method", "class", "interface"):
             name_index.setdefault(n.name, []).append(n)
     by_id = {n.id: n for n in nodes}
+    # Go resolves unqualified identifiers package-wide, but node.module is
+    # per-FILE ("<pkg>.<stem>") — comparing modules made the "same scope" tier
+    # mean "same file" and let cross-package name collisions through (G5-C3).
+    pkg_of = {n.id: f.package for f in files for n in f.nodes}
     edges: list[Edge] = list({(e.type, e.src, e.dst): e for f in files for e in f.edges}.values())
     seen = {(e.type, e.src, e.dst) for e in edges}
 
@@ -216,8 +220,9 @@ def extract_go_paths(paths: list[Path], root: Path) -> Graph:
                 if same:
                     chosen = same
             if chosen is None:
-                same_mod = [c for c in cands if caller and c.module == caller.module]
-                chosen = same_mod or cands
+                same_pkg = [c for c in cands
+                            if caller is not None and pkg_of.get(c.id) == pkg_of.get(caller_id)]
+                chosen = same_pkg or cands
             if len(chosen) > 8:
                 continue
             for c in chosen:
@@ -225,12 +230,16 @@ def extract_go_paths(paths: list[Path], root: Path) -> Graph:
                     seen.add(("CALLS", caller_id, c.id))
                     edges.append(Edge("CALLS", caller_id, c.id, INFERRED, "tree-sitter-go"))
 
+    # G5-C2/C3: Go's lexical unit is the package — same-package resolution is
+    # EXTRACTED; cross-package (even unique) is a guess — INFERRED — and
+    # same-package shadows cross-package. See extract.py.
     for f in files:
         for struct_id, base in f.bases:
             matches = [c for c in name_index.get(base, [])
                        if c.kind in ("class", "interface") and c.id != struct_id]
-            confidence = EXTRACTED if len(matches) == 1 else INFERRED
-            for c in matches:
+            same_pkg = [c for c in matches if pkg_of.get(c.id) == pkg_of.get(struct_id)]
+            confidence = EXTRACTED if len(same_pkg) == 1 else INFERRED
+            for c in (same_pkg or matches):
                 if ("INHERITS", struct_id, c.id) not in seen:
                     seen.add(("INHERITS", struct_id, c.id))
                     edges.append(Edge("INHERITS", struct_id, c.id, confidence))

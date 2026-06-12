@@ -109,8 +109,11 @@ class _TsFile:
             elif t == "lexical_declaration" or t == "variable_declaration":
                 self._arrow_consts(c, parent_id, class_qual)
             elif t == "expression_statement":
-                self._assignment_fn(c, parent_id)
-                self._walk(c, parent_id, class_qual)
+                if self._assignment_fn(c, parent_id) is None:
+                    # Walk only when no node was minted: descending into a matched
+                    # assignment's function body used to leak its nested
+                    # declarations to module scope (G5-C4).
+                    self._walk(c, parent_id, class_qual)
             elif t == "import_statement":
                 src = c.child_by_field_name("source")
                 if src is not None:
@@ -123,29 +126,30 @@ class _TsFile:
     # not a real object hierarchy.
     _PATH_NOISE = ("module", "exports", "prototype")
 
-    def _assignment_fn(self, stmt, parent_id) -> None:
+    def _assignment_fn(self, stmt, parent_id) -> Node | None:
         """CommonJS-style definitions: `exports.f = function`, `app.x = () => …`,
-        `Foo.prototype.m = function` — most pre-ES6 Node code defines this way."""
+        `Foo.prototype.m = function` — most pre-ES6 Node code defines this way.
+        Returns the minted node (callers skip re-walking the expression) or None."""
         expr = next((c for c in stmt.named_children if c.type == "assignment_expression"), None)
         if expr is None:
-            return
+            return None
         left, right = expr.child_by_field_name("left"), expr.child_by_field_name("right")
         if left is None or right is None or right.type not in ("function_expression", "function", "arrow_function"):
-            return
+            return None
         if left.type not in ("member_expression", "identifier"):
-            return  # obj[key] = fn etc. — no stable dotted path to name it by
+            return None  # obj[key] = fn etc. — no stable dotted path to name it by
         raw = self._text(left).split(".")
         if raw and raw[0] == "this":
-            return  # this.x = fn inside a constructor isn't a module-level symbol
+            return None  # this.x = fn inside a constructor isn't a module-level symbol
         segments = [s for s in raw if s and s.isidentifier()]
         if len(segments) != len(raw):
-            return  # any non-identifier segment means a computed/odd path
+            return None  # any non-identifier segment means a computed/odd path
         is_proto = "prototype" in segments
         cleaned = [s for s in segments if s not in self._PATH_NOISE]
         if not cleaned:  # bare `module.exports = function` — use the fn's own name if any
             nm = right.child_by_field_name("name")
             if nm is None:
-                return
+                return None
             cleaned = [self._text(nm)]
         name = cleaned[-1]
         kind = "method" if is_proto and len(cleaned) > 1 else "function"
@@ -155,6 +159,7 @@ class _TsFile:
         body = right.child_by_field_name("body")
         if body is not None:
             self._collect_calls(body, fn.id)
+        return fn
 
     def _arrow_consts(self, node, parent_id, class_qual) -> None:
         for vd in node.children:
@@ -202,7 +207,12 @@ class _TsFile:
         self.edges.append(Edge("CONTAINS", parent_id, cls.id, EXTRACTED))
         for h in node.children:
             if h.type == "class_heritage":
-                for desc in _iter(h):
+                # The recursive walk handles both grammars (TS wraps bases in
+                # extends_clause/implements_clause nodes; JS puts the expression
+                # directly under class_heritage) — but it must NOT descend into
+                # type_arguments: `extends Component<Props, State>` names ONE
+                # base, not three (G5-C1).
+                for desc in _iter(h, skip=("type_arguments",)):
                     if desc.type in ("identifier", "type_identifier"):
                         self.bases.append((cls.id, self._text(desc)))
         body = node.child_by_field_name("body")
@@ -215,6 +225,19 @@ class _TsFile:
                         meth = self._node("method", self._text(mn), mq, m)
                         self.edges.append(Edge("CONTAINS", cls.id, meth.id, EXTRACTED))
                         mb = m.child_by_field_name("body")
+                        if mb is not None:
+                            self._collect_calls(mb, meth.id)
+                elif m.type in ("public_field_definition", "field_definition"):
+                    # `handleClick = () => { … }` — the standard React/handler
+                    # idiom is a method in all but grammar node type (G5-C4).
+                    mn = m.child_by_field_name("name")
+                    val = m.child_by_field_name("value")
+                    if (mn is not None and val is not None
+                            and val.type in ("arrow_function", "function_expression", "function")):
+                        mq = f"{qual}.{self._text(mn)}"
+                        meth = self._node("method", self._text(mn), mq, m)
+                        self.edges.append(Edge("CONTAINS", cls.id, meth.id, EXTRACTED))
+                        mb = val.child_by_field_name("body")
                         if mb is not None:
                             self._collect_calls(mb, meth.id)
 
@@ -234,15 +257,20 @@ class _TsFile:
                 if name:
                     self.calls.append((caller_id, name, is_this))
         for child in node.children:
-            if child.type in ("function_declaration", "class_declaration", "method_definition", "arrow_function"):
+            # Arrows are NOT skipped: `items.forEach(i => doWork())` must credit
+            # doWork to the enclosing function, exactly as Python does for lambdas
+            # and as function-expression callbacks already did here (G5-C4).
+            if child.type in ("function_declaration", "class_declaration", "method_definition"):
                 continue
             self._collect_calls(child, caller_id)
 
 
-def _iter(node):
+def _iter(node, skip: tuple[str, ...] = ()):
     for c in node.children:
+        if c.type in skip:
+            continue
         yield c
-        yield from _iter(c)
+        yield from _iter(c, skip)
 
 
 def extract_ts_paths(paths: list[Path], root: Path) -> Graph:
@@ -293,12 +321,16 @@ def extract_ts_paths(paths: list[Path], root: Path) -> Graph:
                     seen.add(("CALLS", caller_id, c.id))
                     edges.append(Edge("CALLS", caller_id, c.id, INFERRED, "tree-sitter-ts"))
 
+    # G5-C2: same-module resolution is EXTRACTED; cross-module (even unique) is a
+    # guess — INFERRED — and same-module shadows cross-module. See extract.py.
     for f in files:
         for cls_id, base in f.bases:
             matches = [c for c in name_index.get(base, [])
                        if c.kind in ("class", "interface") and c.id != cls_id]
-            confidence = EXTRACTED if len(matches) == 1 else INFERRED
-            for c in matches:
+            cls = by_id.get(cls_id)
+            same_mod = [c for c in matches if cls is not None and c.module == cls.module]
+            confidence = EXTRACTED if len(same_mod) == 1 else INFERRED
+            for c in (same_mod or matches):
                 if ("INHERITS", cls_id, c.id) not in seen:
                     seen.add(("INHERITS", cls_id, c.id))
                     edges.append(Edge("INHERITS", cls_id, c.id, confidence))

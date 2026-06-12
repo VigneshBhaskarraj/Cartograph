@@ -446,15 +446,20 @@ def extract_paths(paths: list[Path], root: Path, resolver: str = "heuristic") ->
                 for c in _heuristic_targets(caller, name, is_self):
                     _add_call(caller_id, c.id, "tree-sitter")
 
-    # Resolve inheritance. A unique name match is deterministic (EXTRACTED); when
-    # several same-named classes exist, at most one edge is right — every candidate
-    # is a guess and must say so (INFERRED), per the confidence invariant.
+    # Resolve inheritance (G5-C2): a base resolving within the class's own module
+    # is deterministic lexical scoping — EXTRACTED. A cross-module match, even a
+    # unique one, is a guess — the real base may be external and unindexed
+    # (`class User(models.Model)` must not pin a random local `Model` with top
+    # confidence) — so it is INFERRED, and same-module matches shadow cross-module
+    # ones, mirroring the CALLS tiers.
     for fx in extractors:
         for cls_id, base in fx.bases:
             matches = [c for c in name_index.get(base, [])
                        if c.kind == "class" and c.id != cls_id]
-            confidence = EXTRACTED if len(matches) == 1 else INFERRED
-            for c in matches:
+            cls = by_id.get(cls_id)
+            same_mod = [c for c in matches if cls is not None and c.module == cls.module]
+            confidence = EXTRACTED if len(same_mod) == 1 else INFERRED
+            for c in (same_mod or matches):
                 key = ("INHERITS", cls_id, c.id)
                 if key not in seen:
                     seen.add(key)

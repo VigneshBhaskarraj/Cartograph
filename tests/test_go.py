@@ -65,3 +65,21 @@ def test_receiver_method_attaches_across_files(tmp_path):
     by_id = {n.id: n for n in g.nodes}
     contains = {(by_id[e.src].name, by_id[e.dst].name) for e in g.edges if e.type == "CONTAINS"}
     assert ("Invoice", "Pay") in contains
+
+
+def test_cross_package_call_collision_resolved_to_same_package(tmp_path):
+    """G5-C3: `module` was per-file, so the same-scope tier meant same-FILE and
+    a call to a same-package helper in another file also matched a same-named
+    function in a different package."""
+    (tmp_path / "use.go").write_text(
+        "package shop\n\nfunc Use() bool {\n    return Helper()\n}\n")
+    (tmp_path / "helper.go").write_text(
+        "package shop\n\nfunc Helper() bool { return true }\n")
+    (tmp_path / "other.go").write_text(
+        "package other\n\nfunc Helper() bool { return false }\n")
+    g = build_graph(tmp_path)
+    by_id = {n.id: n for n in g.nodes}
+    targets = {by_id[e.dst].qualified_name for e in g.edges
+               if e.type == "CALLS" and by_id[e.src].name == "Use"}
+    assert "shop.Helper" in targets
+    assert "other.Helper" not in targets  # the cross-package false positive
