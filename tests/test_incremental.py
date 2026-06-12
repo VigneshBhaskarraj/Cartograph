@@ -147,3 +147,78 @@ def test_update_with_nonexistent_source_path_does_not_wipe(tmp_path):
     store = Store(db)
     assert len(store.node_shas()) > 0  # graph untouched
     store.close()
+
+
+def test_interrupted_update_is_refused_then_repaired(tmp_path, monkeypatch):
+    """G5-B1: Kuzu auto-commits each statement, so a crash mid-delta used to
+    leave a nodes-but-no-edges graph that passed every check. The dirty flag
+    makes readers refuse it and `update` repair it with a full rebuild."""
+    import pytest
+
+    from cartograph.service import open_graph
+
+    repo = _repo(tmp_path, {"a.py": "def f():\n    return 1\n\ndef g():\n    return f()\n"})
+    db = tmp_path / "g.kuzu"
+    index_path(repo, db, dim=32, overwrite=True).close()
+    (repo / "a.py").write_text("def f():\n    return 2\n\ndef g():\n    return f()\n")
+
+    # Crash after edges were wiped, before nodes were reloaded.
+    def boom(self, ids):
+        raise RuntimeError("simulated crash")
+
+    with monkeypatch.context() as m:
+        m.setattr(Store, "delete_nodes", boom)
+        with pytest.raises(RuntimeError, match="simulated crash"):
+            update_index(repo, db, dim=32)
+
+    # Readers refuse the half-written graph instead of serving garbage...
+    with pytest.raises(RuntimeError, match="interrupted"):
+        open_graph(db)
+    # ...even though nothing changed on disk since the crash (up-to-date must not mask dirty).
+    summary = update_index(repo, db, dim=32)
+    assert summary["status"] == "rebuilt"
+    store = open_graph(db)  # opens cleanly again
+    counts = store.counts()
+    assert counts["edge:CONTAINS"] >= 1 and counts["node:function"] == 2
+    store.close()
+
+
+def test_mid_run_edit_is_not_permanently_stale(tmp_path, monkeypatch):
+    """G5-B3 TOCTOU: digests used to be hashed AFTER parsing, so a file edited
+    mid-run recorded the new sha against the old parse — 'up-to-date' forever.
+    Hashed before, the next update detects the edit and re-indexes."""
+    import cartograph.pipeline as pl
+
+    repo = _repo(tmp_path, {"a.py": "def f():\n    return 1\n"})
+    db = tmp_path / "g.kuzu"
+    index_path(repo, db, dim=32, overwrite=True).close()
+    (repo / "a.py").write_text("def f():\n    return 2\n")
+
+    real_build = pl.build_graph
+
+    def edits_after_parse(path, resolver="heuristic"):
+        g = real_build(path, resolver=resolver)
+        (repo / "a.py").write_text("def f():\n    return 3\n")  # the mid-run edit
+        return g
+
+    with monkeypatch.context() as m:
+        m.setattr(pl, "build_graph", edits_after_parse)
+        update_index(repo, db, dim=32)
+
+    summary = update_index(repo, db, dim=32)
+    assert summary["status"] != "up-to-date"  # the edit was detected, not masked
+
+
+def test_moved_sql_table_keeps_correct_position(tmp_path):
+    """G5-B3: SQL node ids carry no line, so a moved CREATE TABLE was 'kept'
+    with its stale start_line on delta update. Position is in the sha now."""
+    repo = _repo(tmp_path, {"schema.sql": "CREATE TABLE users (id INT);\n"})
+    db = tmp_path / "g.kuzu"
+    index_path(repo, db, dim=32, overwrite=True).close()
+    (repo / "schema.sql").write_text("-- a comment banner\n-- pushing things down\n\nCREATE TABLE users (id INT);\n")
+    update_index(repo, db, dim=32)
+    store = Store(db)
+    res = store.conn.execute(
+        "MATCH (c:CodeNode) WHERE c.kind = 'table' AND c.name = 'users' RETURN c.start_line")
+    assert res.get_next()[0] == 4  # the new position, not the stale line 1
+    store.close()

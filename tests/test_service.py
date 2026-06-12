@@ -98,10 +98,15 @@ def test_tools_accept_qualified_name(db):
     svc.close()
 
 
-def test_unknown_ref_is_empty(db):
+def test_unknown_ref_contract(db):
+    """get_node stays lenient (None) for the CLI's checks; traversal tools and
+    strict mode raise — 'unknown symbol' must not read as 'known, no edges'."""
     svc = CartographService(db)
     assert svc.get_node("does.not.exist") is None
-    assert svc.calls("does.not.exist") == []
+    with pytest.raises(ValueError, match="no node matches"):
+        svc.calls("does.not.exist")
+    with pytest.raises(ValueError, match="no node matches"):
+        svc.get_node("does.not.exist", strict=True)
     svc.close()
 
 
@@ -134,3 +139,99 @@ def test_rerank_not_advertised_without_config(db, monkeypatch):
 def test_missing_db_raises(tmp_path):
     with pytest.raises(FileNotFoundError):
         CartographService(tmp_path / "nope.kuzu")
+
+
+def test_neighbors_hops_clamped_not_crashing(db):
+    """hops=50 used to leak a raw Kuzu binder error (ceiling 30); now it clamps
+    to MAX_HOPS and says so in a trailing note instead of erroring."""
+    svc = CartographService(db)
+    dog = next(h["id"] for h in svc.query("Dog", mode="lexical", k=5) if h["name"] == "Dog")
+    nbrs = svc.neighbors(dog, hops=50)
+    assert "clamped" in nbrs[-1]["note"]
+    clamped_ids = {n["id"] for n in nbrs if "id" in n}
+    max_ids = {n["id"] for n in svc.neighbors(dog, hops=8) if "id" in n}
+    assert clamped_ids == max_ids
+    svc.close()
+
+
+def test_invalid_direction_and_relation_raise(db):
+    """A typo'd filter must be an error, not an empty result — agents act on
+    the difference between 'no callers' and 'I asked the question wrong'."""
+    svc = CartographService(db)
+    dog = next(h["id"] for h in svc.query("Dog", mode="lexical", k=5) if h["name"] == "Dog")
+    with pytest.raises(ValueError, match="direction"):
+        svc.neighbors(dog, direction="sideways")
+    with pytest.raises(ValueError, match="CALL"):
+        svc.neighbors(dog, relation="CALL")  # typo for CALLS — list valid values
+    svc.close()
+
+
+def test_resolve_caps_with_truncation_sentinel(tmp_path):
+    """A bare name matching half the codebase must not flood the agent's
+    context — capped at 25 with an explicit {truncated, total} sentinel."""
+    src = tmp_path / "many.py"
+    src.write_text("\n".join(
+        f"class C{i}:\n    def run(self):\n        pass" for i in range(30)))
+    index_path(src, tmp_path / "g.kuzu", dim=64, overwrite=True).close()
+    svc = CartographService(tmp_path / "g.kuzu")
+    out = svc.resolve("run")
+    assert len(out) == 26  # 25 nodes + sentinel
+    sentinel = out[-1]
+    assert sentinel["truncated"] is True and sentinel["total"] == 30
+    assert all("id" in n for n in out[:-1])
+    svc.close()
+
+
+def test_unknown_ref_suggests_candidates(db):
+    """Typo'd refs come back with 'did you mean' — the agent's recovery path.
+    Policy is tiered: fuzzy on the last segment, then substring (G5-A3)."""
+    svc = CartographService(db)
+    with pytest.raises(ValueError, match="did you mean.*speak"):
+        svc.calls("Dog.speek")  # typo -> fuzzy tier
+    assert any(q.endswith("speak") for q in svc.suggest("speek"))
+    svc.close()
+
+
+def test_schema_gate_rejects_each_layer(db):
+    """G5-B2: the gate must catch missing tables, missing/mismatched version,
+    AND missing CodeNode columns — each with a message naming the problem.
+    (Previously a versionless or column-shy graph passed and crashed mid-query.)"""
+    import kuzu
+
+    from cartograph.service import open_graph
+
+    # version mismatch
+    s = Store(db)
+    s.set_meta("schema_version", "0")
+    s.close()
+    with pytest.raises(RuntimeError, match="schema_version 0"):
+        open_graph(db)
+    # missing version (treated as incompatible, not as a free pass)
+    s = Store(db)
+    s.delete_meta("schema_version")
+    s.close()
+    with pytest.raises(RuntimeError, match="no recorded schema_version"):
+        open_graph(db)
+    s = Store(db)
+    s.set_meta("schema_version", "1")
+    s.close()
+    # missing CodeNode column (schema drift without a version bump)
+    conn = kuzu.Connection(kuzu.Database(str(db)))
+    conn.execute("ALTER TABLE CodeNode DROP module")
+    conn.close()
+    with pytest.raises(RuntimeError, match="missing columns: module"):
+        open_graph(db)
+
+
+def test_schema_gate_requires_meta_table(tmp_path):
+    """A Meta-less graph can't prove its version — incompatible, not 'fine'."""
+    import kuzu
+
+    from cartograph.service import open_graph
+
+    index_path(FIX, tmp_path / "g.kuzu", dim=64, overwrite=True).close()
+    conn = kuzu.Connection(kuzu.Database(str(tmp_path / "g.kuzu")))
+    conn.execute("DROP TABLE Meta")
+    conn.close()
+    with pytest.raises(RuntimeError, match="missing tables: Meta"):
+        open_graph(tmp_path / "g.kuzu")

@@ -155,3 +155,21 @@ def test_hybrid_defaults_are_calibrated_constants(tmp_path):
     explicit = r.hybrid("bark sound", k=5, weights=(3.0, 0.5, 0.5), rrf_k=10, depth=50)
     assert default == explicit
     store.close()
+
+
+def test_rerank_k_larger_than_pool_not_capped(tmp_path):
+    """G5-B4: mode=rerank with k>pool used to silently return only `pool`
+    results; the pool must grow to k."""
+    from pathlib import Path
+
+    from cartograph.pipeline import index_path
+    from cartograph.rerank import LexicalReranker
+    from cartograph.retrieve import Retriever
+
+    src = tmp_path / "many.py"
+    src.write_text("\n".join(f"def fn_{i}():\n    return {i}" for i in range(30)))
+    store = index_path(src, tmp_path / "g.kuzu", dim=32, overwrite=True)
+    r = Retriever(store, reranker=LexicalReranker())
+    hits = r.reranked("fn", k=25)
+    assert len(hits) == 25
+    store.close()

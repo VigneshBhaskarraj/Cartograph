@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from pathlib import Path
 
@@ -37,7 +38,12 @@ class EmbeddingCache:
         if c.path.exists():
             try:
                 c.data = json.loads(c.path.read_text())
-            except (json.JSONDecodeError, OSError):
+            except (json.JSONDecodeError, OSError) as exc:
+                # For an Ollama-indexed monorepo a silently dropped cache means
+                # hours of silent re-embedding — reset loudly, not mutely.
+                import warnings
+                warnings.warn(f"embedding cache at {c.path} is unreadable ({exc}); "
+                              "starting empty — changed symbols will re-embed", stacklevel=2)
                 c.data = {}
         return c
 
@@ -58,4 +64,6 @@ class EmbeddingCache:
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(self.data))
+        tmp = self.path.with_name(self.path.name + ".tmp")
+        tmp.write_text(json.dumps(self.data))
+        os.replace(tmp, self.path)  # atomic: a crash mid-write can't corrupt the cache

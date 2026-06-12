@@ -41,7 +41,10 @@ def _table_node(qual: str, bare: str, cols: list[tuple[str, str]], rel_path: str
         end_line=line,
         signature=f"TABLE {qual} ({col_summary})",
         embed_text=f"table {qual}\ncolumns: {col_summary}",
-        content_sha=_sha(f"{qual}|{col_summary}"),
+        # Position is part of the sha: SQL ids carry no line (unlike code nodes'
+        # #<line> suffix), so without it a moved CREATE TABLE would be "kept" on
+        # delta update with its stale start_line (G5-B3).
+        content_sha=_sha(f"{qual}|{col_summary}|{line}"),
     )
 
 
@@ -58,8 +61,28 @@ def _column_node(table_qual: str, col: str, ctype: str, rel_path: str, line: int
         end_line=line,
         signature=f"{col} {ctype}".strip(),
         embed_text=f"column {qn} {ctype}".strip(),
-        content_sha=_sha(f"{qn}|{ctype}"),
+        content_sha=_sha(f"{qn}|{ctype}|{line}"),  # see _table_node on why line is hashed
     )
+
+
+def _statement_lines(source: str, dialect: str | None = None) -> list[int]:
+    """Start line (1-based) of each top-level statement, by splitting the token
+    stream on semicolons — sqlglot parses without recording statement positions
+    (`stmt.meta` never carries one), which is why every SQL node used to claim
+    start_line=0."""
+    import sqlglot
+    from sqlglot.tokens import TokenType
+
+    lines: list[int] = []
+    expect_start = True
+    for t in sqlglot.tokenize(source, read=dialect):
+        if t.token_type == TokenType.SEMICOLON:
+            expect_start = True
+            continue
+        if expect_start:
+            lines.append(t.line)
+            expect_start = False
+    return lines
 
 
 def extract_sql_source(source: str, rel_path: str, dialect: str | None = None):
@@ -73,19 +96,23 @@ def extract_sql_source(source: str, rel_path: str, dialect: str | None = None):
     pending_fks: list[tuple[str, str]] = []
     try:
         statements = sqlglot.parse(source, read=dialect)
+        lines = _statement_lines(source, dialect)
     except Exception as exc:
         import warnings
         warnings.warn(f"SQL parse failed for {rel_path} ({exc}); skipping. Try a --dialect.", stacklevel=2)
         return nodes, edges, pending_fks
+    if len(lines) != len(statements):  # token/parse segmentation disagree — don't mis-attribute
+        lines = [0] * len(statements)
 
-    for stmt in statements:
+    for stmt, line in zip(statements, lines):
         if isinstance(stmt, exp.Create) and (stmt.kind or "").upper() == "TABLE":
-            _create_to_nodes(stmt, rel_path, nodes, edges, pending_fks)
+            _create_to_nodes(stmt, rel_path, nodes, edges, pending_fks, line)
 
     return nodes, edges, pending_fks
 
 
-def _create_to_nodes(stmt, rel_path: str, nodes: list, edges: list, pending_fks: list) -> None:
+def _create_to_nodes(stmt, rel_path: str, nodes: list, edges: list, pending_fks: list,
+                     line: int = 0) -> None:
     """Append table + column nodes, CONTAINS edges, and pending FKs for one CREATE TABLE."""
     from sqlglot import exp
 
@@ -93,7 +120,6 @@ def _create_to_nodes(stmt, rel_path: str, nodes: list, edges: list, pending_fks:
     if tbl is None:
         return
     qual = _qual(tbl)
-    line = (stmt.meta or {}).get("line", 0) or 0
     col_defs = list(stmt.find_all(exp.ColumnDef))
     cols = [(c.name, (c.args.get("kind").sql() if c.args.get("kind") else "")) for c in col_defs]
     table = _table_node(qual, tbl.name, cols, rel_path, line)

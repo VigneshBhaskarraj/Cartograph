@@ -90,13 +90,37 @@ def test_query_bad_embedder_is_friendly(tmp_path):
     assert "unknown embedder" in r.output
 
 
-def test_serve_missing_db_is_friendly(tmp_path):
+def test_serve_missing_db_stays_up_and_reports_through_mcp(tmp_path):
+    """serve must NOT die on a bad DB (the client would see only "Connection
+    closed") — it warns on stderr, completes the handshake, and returns the
+    friendly error from tool calls. Real subprocess: a stdio server can't be
+    exercised honestly under CliRunner."""
+    import json
+    import subprocess
+    import sys
+
     import pytest
 
     pytest.importorskip("mcp")
-    r = runner.invoke(app, ["serve", "--db", str(tmp_path / "missing.kuzu")])
-    assert r.exit_code == 1
-    assert "no graph at" in r.output
+    db = str(tmp_path / "missing.kuzu")
+    frames = "\n".join(json.dumps(m) for m in [
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+         "params": {"protocolVersion": "2024-11-05", "capabilities": {},
+                    "clientInfo": {"name": "test", "version": "0"}}},
+        {"jsonrpc": "2.0", "method": "notifications/initialized"},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "query", "arguments": {"text": "x"}}},
+    ]) + "\n"
+    proc = subprocess.run(
+        [sys.executable, "-c",
+         f"import sys; from cartograph.cli import app; sys.argv = ['cartograph', 'serve', '--db', {db!r}]; app()"],
+        input=frames, capture_output=True, text=True, timeout=60)
+    assert "no graph at" in proc.stderr  # preflight warning for the human
+    replies = {m.get("id"): m for m in map(json.loads, proc.stdout.splitlines())}
+    assert "serverInfo" in replies[1]["result"]  # handshake survived the bad DB
+    tool_result = replies[2]["result"]
+    assert tool_result["isError"] is True
+    assert "no graph at" in tool_result["content"][0]["text"]  # actionable error reached the agent
 
 
 def test_index_venv_skipped_only_when_real_venv(tmp_path):
@@ -151,3 +175,20 @@ def test_missing_language_extra_warns_loudly(tmp_path, monkeypatch):
     with _pytest.warns(UserWarning, match="Java files.*NOT indexed.*--extra java"):
         g = build_graph(tmp_path)
     assert any(n.name == "f" for n in g.nodes)  # the python half still indexed
+
+
+def test_demo_missing_file_is_friendly(tmp_path):
+    r = runner.invoke(app, ["demo", str(tmp_path / "nope.py")])
+    assert r.exit_code == 1
+    assert "Traceback" not in r.output
+
+
+def test_query_rerank_reachable_from_cli(tmp_path, monkeypatch):
+    """Regression (G5-A4): the CLI used to bypass the service, making rerank
+    mode unreachable even with CARTOGRAPH_RERANKER set."""
+    monkeypatch.setenv("CARTOGRAPH_RERANKER", "lexical")
+    db = str(tmp_path / "g.kuzu")
+    runner.invoke(app, ["index", str(FIX), "--db", db])
+    r = runner.invoke(app, ["query", "bark", "--db", db, "--mode", "rerank"])
+    assert r.exit_code == 0
+    assert "[" in r.output  # ranked rows printed

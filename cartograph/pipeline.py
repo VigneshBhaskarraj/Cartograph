@@ -292,6 +292,11 @@ def index_path(path: Path, db_path: Path, dim: int = DEFAULT_DIM, embedder=None,
     or 'jedi' (receiver-type call resolution).
     """
     embedder = embedder or get_embedder(dim=dim)
+    # Digests are captured BEFORE parsing (G5-B3): hashed after, a file edited
+    # mid-run would record the new sha against the old parse and read as
+    # "up-to-date" forever. Captured first, the worst case is one redundant
+    # re-index on the next update.
+    digests = _file_digests(path)
     graph = build_graph(path, resolver=resolver)
     cache = None
     if use_cache:
@@ -302,6 +307,15 @@ def index_path(path: Path, db_path: Path, dim: int = DEFAULT_DIM, embedder=None,
     actual_dim = len(graph.nodes[0].embedding) if graph.nodes and graph.nodes[0].embedding else dim
     store = Store.create(db_path, dim=actual_dim, overwrite=overwrite)
     store.cache_stats = (reused, embedded)  # surfaced to the CLI for reporting
+    # Kuzu auto-commits each statement, so a crash mid-load would leave a
+    # partial graph that passes every table check. The dirty flag is durably
+    # set before the first row lands and cleared only after the last meta —
+    # open_graph refuses dirty graphs (G5-B1).
+    store.set_meta("dirty", "1")
+    # Version goes in before any rows: a crash mid-load then reads as "interrupted"
+    # (the dirty gate's message) rather than "incompatible Cartograph" (the
+    # missing-version gate's), which would send the user to the wrong fix.
+    store.set_meta("schema_version", SCHEMA_VERSION)
     store.load(graph, dim=actual_dim)
     # Record the embedder so a reader (CLI query, MCP server) reconstructs a matching one.
     name = getattr(embedder, "name", "hash")
@@ -309,10 +323,10 @@ def index_path(path: Path, db_path: Path, dim: int = DEFAULT_DIM, embedder=None,
     store.set_meta("embedder_backend", backend)
     store.set_meta("embedder_model", model)
     store.set_meta("embedding_dim", str(actual_dim))
-    store.set_meta("schema_version", SCHEMA_VERSION)
     # Per-file content hashes, so `update` can detect what changed without re-embedding.
-    for rel, sha in _file_digests(path).items():
+    for rel, sha in digests.items():
         store.set_meta(f"file:{rel}", sha)
+    store.delete_meta("dirty")
     return store
 
 
@@ -347,14 +361,14 @@ def update_index(path: Path, db_path: Path, dim: int = DEFAULT_DIM, embedder=Non
         return {"status": "indexed", "changed": sorted(_file_digests(path)), "added": [],
                 "deleted": [], "created": 0, "removed": 0}
     delta = diff_files(path, db_path)
-    if not (delta["changed"] or delta["deleted"]):
-        return {"status": "up-to-date", **delta, "embedded": 0, "reused": 0, "created": 0, "removed": 0}
-
     meta_store = Store(db_path)
+    dirty = meta_store.get_meta("dirty") is not None
     prev_dim = meta_store.get_meta("embedding_dim")
     prev_backend = meta_store.get_meta("embedder_backend")
     prev_model = meta_store.get_meta("embedder_model") or ""
     meta_store.close()
+    if not dirty and not (delta["changed"] or delta["deleted"]):
+        return {"status": "up-to-date", **delta, "embedded": 0, "reused": 0, "created": 0, "removed": 0}
     if embedder is None and prev_backend:
         # A plain `update` must keep the index's embedder: defaulting to hash on an
         # ollama-built graph would mix vector spaces (both 768-dim — nothing errors).
@@ -364,6 +378,16 @@ def update_index(path: Path, db_path: Path, dim: int = DEFAULT_DIM, embedder=Non
         except ValueError:
             pass  # unknown recorded backend (hand-built store) — use the default
     embedder = embedder or get_embedder(dim=dim)
+    digests = _file_digests(path)  # before parsing — see index_path (G5-B3)
+    if dirty:
+        # A previous index/update died mid-write: the row-level delta below would
+        # diff against a half-written graph. A full rebuild is the deterministic
+        # repair (embeddings come from the cache, so it's cheap).
+        st = index_path(path, db_path, dim=dim, embedder=embedder, overwrite=True, resolver=resolver)
+        reused, embedded = getattr(st, "cache_stats", (0, 0))
+        st.close()
+        return {"status": "rebuilt", **delta, "embedded": embedded, "reused": reused,
+                "created": 0, "removed": 0}
     try:
         graph = build_graph(path, resolver=resolver)
     except FileNotFoundError:
@@ -371,10 +395,12 @@ def update_index(path: Path, db_path: Path, dim: int = DEFAULT_DIM, embedder=Non
         # not a crash that leaves the stale graph serving answers.
         store = Store(db_path)
         removed = len(store.node_shas())
+        store.set_meta("dirty", "1")  # crash guard — see index_path
         store.delete_all_edges()
         store.conn.execute("MATCH (c:CodeNode) DETACH DELETE c")
         for rel in delta["deleted"]:
             store.delete_meta(f"file:{rel}")
+        store.delete_meta("dirty")
         store.close()
         return {"status": "updated", **delta, "embedded": 0, "reused": 0,
                 "created": 0, "removed": removed}
@@ -399,6 +425,7 @@ def update_index(path: Path, db_path: Path, dim: int = DEFAULT_DIM, embedder=Non
     keep = {n.id for n in graph.nodes if db_sha.get(n.id) == n.content_sha}
     delete_ids = [i for i in db_sha if i not in keep]
     create_nodes = [n for n in graph.nodes if n.id not in keep]
+    store.set_meta("dirty", "1")  # crash guard — see index_path
     store.delete_all_edges()
     store.delete_nodes(delete_ids)
     store.load_nodes(create_nodes, actual_dim)
@@ -409,10 +436,11 @@ def update_index(path: Path, db_path: Path, dim: int = DEFAULT_DIM, embedder=Non
     store.set_meta("embedder_model", model)
     store.set_meta("embedding_dim", str(actual_dim))
     store.set_meta("schema_version", SCHEMA_VERSION)
-    for rel, sha in _file_digests(path).items():
+    for rel, sha in digests.items():
         store.set_meta(f"file:{rel}", sha)
     for rel in delta["deleted"]:
         store.delete_meta(f"file:{rel}")
+    store.delete_meta("dirty")
     store.close()
     return {"status": "updated", **delta, "embedded": embedded, "reused": reused,
             "created": len(create_nodes), "removed": len(delete_ids)}

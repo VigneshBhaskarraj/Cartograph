@@ -48,6 +48,21 @@ def schema_ddl(dim: int = DEFAULT_DIM) -> list[str]:
     ]
 
 
+def expected_codenode_columns() -> set[str]:
+    """Column names parsed from the CodeNode DDL — the gate in open_graph compares
+    a graph's actual columns against these. Derived from schema_ddl() itself so a
+    new column can't be added without the check learning about it (the drift that
+    motivated G5-B2)."""
+    ddl = schema_ddl()[0]
+    body = ddl[ddl.index("(") + 1:ddl.rindex(")")]
+    cols = set()
+    for piece in body.split(","):
+        tok = piece.split()
+        if tok and tok[0].upper() != "PRIMARY":
+            cols.add(tok[0])
+    return cols
+
+
 class Store:
     def __init__(self, db_path: str | Path, read_only: bool = False):
         self.path = Path(db_path)
@@ -92,6 +107,13 @@ class Store:
         while res.has_next():
             names.add(res.get_next()[0])
         return names
+
+    def codenode_columns(self) -> set[str]:
+        res = self.conn.execute("CALL table_info('CodeNode') RETURN name")
+        cols: set[str] = set()
+        while res.has_next():
+            cols.add(res.get_next()[0])
+        return cols
 
     # -- loading --------------------------------------------------------------
     def load(self, graph: Graph, dim: int = DEFAULT_DIM) -> None:
@@ -310,14 +332,30 @@ class Store:
             "MATCH (c:CodeNode) WHERE c.name = $r AND c.kind <> 'external' "
             "RETURN c.id, c.qualified_name", {"r": ref})
 
+    def symbol_names(self) -> list[tuple[str, str]]:
+        """(name, qualified_name) for every non-external node — the candidate
+        pool for 'did you mean' suggestions on unknown references."""
+        res = self.conn.execute(
+            "MATCH (c:CodeNode) WHERE c.kind <> 'external' RETURN c.name, c.qualified_name")
+        out: list[tuple[str, str]] = []
+        while res.has_next():
+            r = res.get_next()
+            out.append((r[0], r[1]))
+        return out
+
     def relations(self, node_id: str, direction: str = "both", types: list[str] | None = None) -> list[dict]:
         """1-hop edges of a node, each labeled with relation type and direction
-        ('out' = node is the source, 'in' = node is the target)."""
+        ('out' = node is the source, 'in' = node is the target). Invalid filters
+        raise — silently returning [] would be indistinguishable from "no edges",
+        and agents act on that difference."""
+        if direction not in ("out", "in", "both"):
+            raise ValueError(f"direction must be one of ['both', 'in', 'out'], got {direction!r}")
         types = types or list(EDGE_TYPES)
+        unknown = [t for t in types if t not in EDGE_TYPES]
+        if unknown:
+            raise ValueError(f"unknown relation(s) {unknown}; valid: {sorted(EDGE_TYPES)}")
         out: list[dict] = []
         for et in types:
-            if et not in EDGE_TYPES:
-                continue
             if direction in ("out", "both"):
                 res = self.conn.execute(
                     f"MATCH (a:CodeNode {{id:$id}})-[:{et}]->(b:CodeNode) RETURN DISTINCT b.id", {"id": node_id}
