@@ -405,37 +405,14 @@ def extract_paths(paths: list[Path], root: Path, resolver: str = "heuristic") ->
         if n.kind in ("function", "method", "class") and n.qualified_name not in qual_index:
             qual_index[n.qualified_name] = n
 
-    # Resolve calls (INFERRED). Prefer the caller's own class for `self.` calls, then
-    # same-module candidates, before falling back to all name matches.
+    # Resolve calls and inheritance via the shared tiered pass (G5-C5): Python's
+    # lexical resolution unit is the module.
+    from .resolve import make_heuristic_targets, resolve_calls, resolve_inherits
+
     seen: set[tuple[str, str, str]] = {(e.type, e.src, e.dst) for e in edges}
 
-    def _class_of(node: Node) -> str | None:
-        return node.qualified_name.rsplit(".", 1)[0] if node.kind == "method" else None
-
-    def _heuristic_targets(caller: Node | None, name: str, is_self: bool) -> list[Node]:
-        cands = name_index.get(name)
-        if not cands:
-            return []
-        chosen: list[Node] | None = None
-        if is_self and caller is not None and caller.kind == "method":
-            caller_class = _class_of(caller)
-            same_class = [c for c in cands if _class_of(c) == caller_class]
-            if same_class:  # self.x() bound to this class's own method
-                chosen = same_class
-        if chosen is None:
-            same = [c for c in cands if caller and c.module == caller.module]
-            chosen = same or cands
-        if len(chosen) > 8:  # avoid god-node fan-out on very common names
-            return []
-        return chosen
-
-    def _add_call(caller_id: str, target_id: str, resolver_tag: str) -> None:
-        if target_id == caller_id:
-            return
-        key = ("CALLS", caller_id, target_id)
-        if key not in seen:
-            seen.add(key)
-            edges.append(Edge("CALLS", caller_id, target_id, INFERRED, resolver_tag))
+    def _module_of(n: Node) -> str:
+        return n.module
 
     if resolver == "jedi":
         try:
@@ -444,33 +421,26 @@ def extract_paths(paths: list[Path], root: Path, resolver: str = "heuristic") ->
             raise ModuleNotFoundError(
                 "resolver='jedi' needs the 'resolve' extra: uv sync --extra resolve"
             ) from exc
+
+        _heuristic_targets = make_heuristic_targets(name_index, _module_of)
+
+        def _add_call(caller_id: str, target_id: str, resolver_tag: str) -> None:
+            if target_id == caller_id:
+                return
+            key = ("CALLS", caller_id, target_id)
+            if key not in seen:
+                seen.add(key)
+                edges.append(Edge("CALLS", caller_id, target_id, INFERRED, resolver_tag))
+
         _resolve_calls_jedi(extractors, paths, pkg_parent, by_id, qual_index,
                             _heuristic_targets, _add_call)
     else:
-        for fx in extractors:
-            for caller_id, name, is_self, _row, _col in fx.calls:
-                caller = by_id.get(caller_id)
-                for c in _heuristic_targets(caller, name, is_self):
-                    _add_call(caller_id, c.id, "tree-sitter")
+        resolve_calls(((cid, name, is_self) for fx in extractors
+                       for cid, name, is_self, _row, _col in fx.calls),
+                      name_index, by_id, _module_of, seen, edges, "tree-sitter")
 
-    # Resolve inheritance (G5-C2): a base resolving within the class's own module
-    # is deterministic lexical scoping — EXTRACTED. A cross-module match, even a
-    # unique one, is a guess — the real base may be external and unindexed
-    # (`class User(models.Model)` must not pin a random local `Model` with top
-    # confidence) — so it is INFERRED, and same-module matches shadow cross-module
-    # ones, mirroring the CALLS tiers.
-    for fx in extractors:
-        for cls_id, base in fx.bases:
-            matches = [c for c in name_index.get(base, [])
-                       if c.kind == "class" and c.id != cls_id]
-            cls = by_id.get(cls_id)
-            same_mod = [c for c in matches if cls is not None and c.module == cls.module]
-            confidence = EXTRACTED if len(same_mod) == 1 else INFERRED
-            for c in (same_mod or matches):
-                key = ("INHERITS", cls_id, c.id)
-                if key not in seen:
-                    seen.add(key)
-                    edges.append(Edge("INHERITS", cls_id, c.id, confidence))
+    resolve_inherits(((cls_id, base) for fx in extractors for cls_id, base in fx.bases),
+                     name_index, by_id, _module_of, ("class",), seen, edges)
 
     # Resolve imports: internal module if known, else an external module node.
     ext_nodes: dict[str, Node] = {}

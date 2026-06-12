@@ -301,43 +301,16 @@ def extract_ts_paths(paths: list[Path], root: Path) -> Graph:
     edges: list[Edge] = list({(e.type, e.src, e.dst): e for f in files for e in f.edges}.values())
     seen = {(e.type, e.src, e.dst) for e in edges}
 
-    def _class_of(n: Node) -> str | None:
-        return n.qualified_name.rsplit(".", 1)[0] if n.kind == "method" else None
+    # Shared tiered resolution (G5-C5): TS/JS resolve per module file.
+    from .resolve import resolve_calls, resolve_inherits
 
-    for f in files:
-        for caller_id, name, is_this in f.calls:
-            cands = name_index.get(name)
-            if not cands:
-                continue
-            caller = by_id.get(caller_id)
-            chosen = None
-            if is_this and caller is not None and caller.kind == "method":
-                same = [c for c in cands if _class_of(c) == _class_of(caller)]
-                if same:
-                    chosen = same
-            if chosen is None:
-                samemod = [c for c in cands if caller and c.module == caller.module]
-                chosen = samemod or cands
-            if len(chosen) > 8:
-                continue
-            for c in chosen:
-                if c.id != caller_id and ("CALLS", caller_id, c.id) not in seen:
-                    seen.add(("CALLS", caller_id, c.id))
-                    edges.append(Edge("CALLS", caller_id, c.id, INFERRED, "tree-sitter-ts"))
+    def _module_of(n: Node) -> str:
+        return n.module
 
-    # G5-C2: same-module resolution is EXTRACTED; cross-module (even unique) is a
-    # guess — INFERRED — and same-module shadows cross-module. See extract.py.
-    for f in files:
-        for cls_id, base in f.bases:
-            matches = [c for c in name_index.get(base, [])
-                       if c.kind in ("class", "interface") and c.id != cls_id]
-            cls = by_id.get(cls_id)
-            same_mod = [c for c in matches if cls is not None and c.module == cls.module]
-            confidence = EXTRACTED if len(same_mod) == 1 else INFERRED
-            for c in (same_mod or matches):
-                if ("INHERITS", cls_id, c.id) not in seen:
-                    seen.add(("INHERITS", cls_id, c.id))
-                    edges.append(Edge("INHERITS", cls_id, c.id, confidence))
+    resolve_calls(((cid, name, is_this) for f in files for cid, name, is_this in f.calls),
+                  name_index, by_id, _module_of, seen, edges, "tree-sitter-ts")
+    resolve_inherits(((cls_id, base) for f in files for cls_id, base in f.bases),
+                     name_index, by_id, _module_of, ("class", "interface"), seen, edges)
 
     ext: dict[str, Node] = {}
     for f in files:
