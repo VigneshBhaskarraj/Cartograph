@@ -112,19 +112,22 @@ with any local Ollama chat model via `eval/agent_bench/run_bench.py`.
 - [x] M5 — code↔schema bridge: ORM `__tablename__` → table (`MAPS_TO`) **and** raw-SQL embedded in Python → tables + `QUERIES` edges (function → table/**column**) + `JOINS` (table↔table from query JOINs); schema-bridging eval on a synthetic corpus (recall@10 **1.0**) **and the real `ai-digest` repo** (~0.86); generalized eval runner (`--questions`/`--db`)
 - [x] M6 — second language: **TypeScript/TSX** extractor via tree-sitter (`--extra ts`) — classes, interfaces, functions, arrow-const functions, methods, `extends` (INHERITS), imports, heuristic calls — into the same graph (polyglot: Python + TS in one store)
 
-**Latest eval — validated 2026-06-11** (real `nomic-embed-text` embeddings, **89
-questions / 5 corpora**, one corpus fully held out from tuning). Mean across corpora:
+**Latest eval — validated 2026-06-12** (real `nomic-embed-text` embeddings, **101
+questions / 6 corpora** spanning Python, Java+JPA, and raw-SQL apps; two corpora held
+out from all tuning). Mean across corpora:
 
 | system | recall@5 | recall@10 | mrr |
 |---|---|---|---|
-| naive-rag (structure-blind chunks) | 0.52 | 0.72 | 0.23 |
-| grep over raw source | 0.53 | 0.67 | 0.36 |
-| vector (single signal) | 0.85 | 0.93 | 0.71 |
-| **Cartograph hybrid** | **0.88** | **0.95** | **0.74** |
+| naive-rag (structure-blind chunks) | 0.51 | 0.73 | 0.26 |
+| grep over raw source | 0.54 | 0.68 | 0.38 |
+| vector (single signal) | 0.85 | 0.91 | 0.71 |
+| **Cartograph hybrid** | **0.87** | **0.93** | **0.73** |
 
-The calibrated fusion **generalizes**: on the held-out corpus (click, untouched by any
-tuning) hybrid ties vector on recall@5 and beats it on recall@10 (0.944 vs 0.889) and
-MRR (0.706 vs 0.653). Agent-task evidence (equal success, **42% fewer tool calls** vs
+The calibrated fusion **generalizes**: hybrid wins-or-ties vector on recall@10 on all
+six corpora — including both held-out ones (click: 0.944 vs 0.889; spring-petclinic,
+the Java corpus: 0.833, vs grep's 0.75). Known gap, recorded honestly: Java SEMANTIC
+queries trail (javadoc isn't yet captured into embedding text the way Python
+docstrings are). Agent-task evidence (equal success, **42% fewer tool calls** vs
 grep): [`eval/agent_bench/RESULTS.md`](./eval/agent_bench/RESULTS.md). Full tables and
 methodology: [`eval/README.md`](./eval/README.md).
 
