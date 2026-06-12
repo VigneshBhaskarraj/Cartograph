@@ -46,14 +46,45 @@ def test_html_is_self_contained(tmp_path):
     layout_3d(data, iterations=10)
     html = build_html(data, title="t")
     assert "__CARTOGRAPH_DATA__" not in html and "__CARTOGRAPH_TITLE__" not in html
-    # zero egress: no external resource loads in the generated page
-    assert "http-equiv" not in html
+    # zero egress: a CSP forbids ALL loads/connects; no meta-refresh; no external
+    # resource references (the GitHub href is navigation-only)
+    assert "Content-Security-Policy" in html and "default-src 'none'" in html
+    assert 'http-equiv="refresh"' not in html
     assert 'src="http' not in html and 'href="http' not in html.replace(
         'href="https://github.com/VigneshBhaskarraj/Cartograph"', "")
-    # the data survives the script-safe escaping round trip
     raw = html.split('<script id="data" type="application/json">')[1].split("</script>")[0]
-    parsed = json.loads(raw.replace("<\\/", "</"))
+    parsed = json.loads(raw)  # < escaping is valid JSON — no un-escaping needed
     assert len(parsed["nodes"]) == len(data["nodes"])
+
+
+def test_hostile_docstrings_cannot_break_the_script_block(tmp_path):
+    """Review finding: `</script>` ends the data block and `<!--` + `<script` (even
+    in different docstrings) swallows it. Every `<` must be \\u003c-escaped, and the
+    payload must round-trip as plain JSON."""
+    src = tmp_path / "hostile.py"
+    src.write_text(
+        '"""Module doc with </script><script>alert(1)</script>."""\n\n'
+        'def f():\n'
+        '    """Has <!--<script in it, and a lone </ too."""\n'
+        '    return 1\n'
+    )
+    store = index_path(src, tmp_path / "g.kuzu", dim=16, overwrite=True)
+    data = export_graph_data(store)
+    store.close()
+    layout_3d(data, iterations=5)
+    html = build_html(data, title="hostile")
+    raw = html.split('<script id="data" type="application/json">')[1].split("</script>")[0]
+    assert "<" not in raw  # every angle bracket in the data is escaped
+    parsed = json.loads(raw)
+    doc = next(n["doc"] for n in parsed["nodes"] if n["name"] == "f")
+    assert "<!--<script" in doc  # content survives intact after JSON.parse
+
+
+def test_wheel_packages_the_template():
+    from importlib import resources
+
+    t = resources.files("cartograph").joinpath("viz_assets/template.html").read_text(encoding="utf-8")
+    assert "__CARTOGRAPH_DATA__" in t
 
 
 def test_viz_cli_writes_file(tmp_path):

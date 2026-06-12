@@ -4,6 +4,9 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<!-- In-page enforcement of the zero-egress promise: nothing may load or connect. -->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:;">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>__CARTOGRAPH_TITLE__ — Cartograph</title>
 <style>
@@ -227,12 +230,13 @@ function draw() {
 
 // ---- picking ------------------------------------------------------------------
 function pick(mx, my) {
-  let best = -1, bd = 144;
+  // Per-node hit radius (at least 12px, or the drawn body), nearest wins.
+  let best = -1, bd = Infinity;
   for (let i = 0; i < N.length; i++) {
     if (!nodeVisible(i)) continue;
     const dx = P[i * 3] - mx, dy = P[i * 3 + 1] - my;
     const d = dx * dx + dy * dy, r = radius(i) + 5;
-    if (d < Math.max(bd, r * r) && d < 400) { best = i; bd = d; }
+    if (d < Math.max(144, r * r) && d < bd) { best = i; bd = d; }
   }
   return best;
 }
@@ -270,7 +274,9 @@ cv.addEventListener("wheel", e => {
   draw();
 }, { passive: false });
 cv.addEventListener("contextmenu", e => e.preventDefault());
-addEventListener("keydown", e => { if (e.key === "Escape") overview(); });
+addEventListener("keydown", e => {
+  if (e.key === "Escape" && e.target !== searchEl) overview();
+});
 
 function clickAt(mx, my) {
   const i = pick(mx, my);
@@ -324,10 +330,11 @@ function status(msg) {
 
 // ---- panels ----------------------------------------------------------------------
 function renderDetail(i) {
+  if (EMBED) return; // embed view stays clean — no panels on interaction either
   const n = N[i], d = document.getElementById("detail");
   d.style.display = "block";
   d.innerHTML = `
-    <span class="kind" style="background:${kc(n.kind)}">${n.kind}</span>
+    <span class="kind" style="background:${kc(n.kind)}">${esc(n.kind)}</span>
     <div class="qn">${esc(n.qn)}</div>
     <div class="meta">${esc(n.file)}:${n.line} · degree ${n.deg}</div>
     ${n.sig ? `<div class="sig">${esc(n.sig)}</div>` : ""}
@@ -367,15 +374,15 @@ function buildFilters() {
   L.forEach(l => types[l.y] = (types[l.y] || 0) + 1);
   let html = "<h3>node kinds</h3>";
   for (const k of Object.keys(kinds).sort()) {
-    html += `<label><input type="checkbox" data-kind="${k}" ${st.kinds.has(k) ? "checked" : ""}>
+    html += `<label><input type="checkbox" data-kind="${esc(k)}" ${st.kinds.has(k) ? "checked" : ""}>
       <span class="sw" style="background:${kc(k)};display:inline-block;width:9px;height:9px;border-radius:3px"></span>
-      ${k}<span class="cnt">${kinds[k]}</span></label>`;
+      ${esc(k)}<span class="cnt">${kinds[k]}</span></label>`;
   }
   html += "<h3>edge types</h3>";
   for (const y of Object.keys(types).sort()) {
-    html += `<label><input type="checkbox" data-type="${y}" checked>
+    html += `<label><input type="checkbox" data-type="${esc(y)}" checked>
       <span class="lw" style="background:${ec(y)};display:inline-block;width:14px;height:3px;border-radius:2px"></span>
-      ${y}<span class="cnt">${types[y]}</span></label>`;
+      ${esc(y)}<span class="cnt">${types[y]}</span></label>`;
   }
   html += `<h3>confidence</h3>
     <label><input type="checkbox" id="inf" checked> show INFERRED edges</label>`;
@@ -392,9 +399,9 @@ function buildLegend() {
   const el = document.getElementById("legend");
   const kinds = [...new Set(N.map(n => n.kind))].sort();
   const types = [...new Set(L.map(l => l.y))].sort();
-  el.innerHTML = kinds.map(k => `<div class="li"><span class="sw" style="background:${kc(k)}"></span>${k}</div>`).join("")
+  el.innerHTML = kinds.map(k => `<div class="li"><span class="sw" style="background:${kc(k)}"></span>${esc(k)}</div>`).join("")
     + `<div style="height:5px"></div>`
-    + types.map(y => `<div class="li"><span class="lw" style="background:${ec(y)}"></span>${y}</div>`).join("")
+    + types.map(y => `<div class="li"><span class="lw" style="background:${ec(y)}"></span>${esc(y)}</div>`).join("")
     + `<div class="li" style="margin-top:4px">faint = INFERRED, solid = EXTRACTED</div>`;
 }
 

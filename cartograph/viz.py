@@ -55,9 +55,9 @@ def export_graph_data(store: Store) -> dict:
 
 
 def layout_3d(data: dict, iterations: int = 200, seed: int = 42) -> None:
-    """Vectorized 3D Fruchterman–Reingold; writes x/y/z onto each node (z also
-    doubles as depth for the 2D view's node shading). O(N²) per iteration in
-    numpy — ~2k nodes lays out in a few seconds, which is the intended scale."""
+    """Vectorized 3D Fruchterman–Reingold; writes x/y/z onto each node (the 2D
+    view simply projects x/y). O(N²) per iteration in numpy — ~2k nodes lays
+    out in a few seconds, which is the intended scale."""
     n = len(data["nodes"])
     if n == 0:
         return
@@ -70,12 +70,13 @@ def layout_3d(data: dict, iterations: int = 200, seed: int = 42) -> None:
     else:
         src = dst = np.zeros(0, dtype=int)
     volume = max(n, 2) ** (1 / 3) * 10.0
-    k = volume / max(n, 2) ** (1 / 3)  # ideal pairwise distance
+    k = 10.0  # ideal pairwise distance (constant by construction; volume drives t)
     t = volume * 0.1  # temperature, cooled linearly
     for it in range(iterations):
         diff = pos[:, None, :] - pos[None, :, :]            # (n, n, 3)
         dist = np.linalg.norm(diff, axis=2)
         np.fill_diagonal(dist, np.inf)
+        dist = np.maximum(dist, 1e-9)  # coincident nodes must not NaN the layout
         # Repulsion k²/d between every pair.
         rep = (k * k) / dist
         disp = (diff / dist[..., None] * rep[..., None]).sum(axis=1)
@@ -101,10 +102,14 @@ def layout_3d(data: dict, iterations: int = 200, seed: int = 42) -> None:
 
 
 def build_html(data: dict, title: str = "Cartograph") -> str:
-    template = resources.files("cartograph").joinpath("viz_assets/template.html").read_text()
-    payload = json.dumps(data, separators=(",", ":"))
-    # Embedding inside <script>: close-tag sequences must not terminate the block.
-    payload = payload.replace("</", "<\\/")
+    template = resources.files("cartograph").joinpath(
+        "viz_assets/template.html").read_text(encoding="utf-8")
+    payload = json.dumps(data, separators=(",", ":"), allow_nan=False)
+    # Embedding inside <script>: per the HTML tokenizer, a literal `</script>` ends
+    # the block, and `<!--` + `<script` (even split across different docstrings)
+    # enters double-escaped state and swallows the real close tag. Escaping every
+    # `<` as < (valid JSON) neutralizes all of it — the json_script approach.
+    payload = payload.replace("<", "\\u003c")
     return (template
             .replace("__CARTOGRAPH_TITLE__", title)
             .replace("__CARTOGRAPH_DATA__", payload))
@@ -124,6 +129,6 @@ def write_viz(db_path: str | Path, out_path: str | Path, title: str | None = Non
     html = build_html(data, title=title or Path(db_path).stem)
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(html)
+    out.write_text(html, encoding="utf-8")
     return {"nodes": len(data["nodes"]), "links": len(data["links"]),
             "bytes": len(html), "out": str(out)}

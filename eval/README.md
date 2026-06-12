@@ -66,9 +66,10 @@ calibration and never used for tuning. Means across the five corpora:
 
 - **Held-out validation:** on click, baked hybrid vs vector = r@5 0.778/0.778 (tie),
   r@10 **0.944**/0.889, mrr **0.706**/0.653 → the calibration **generalizes**
-  (`fusion_sweep.py` prints this check; its 71-question tuning sweep also found a
-  near-tied alternative config — not adopted, since selecting on the held-out corpus
-  would burn its held-out status).
+  (`fusion_sweep.py` prints this check; its 71-question tuning sweep also recommended
+  an alternative config, `weights=(1.5, 1.0, 0.5)`, scoring 0.920/0.946/0.740 vs the
+  baked config's 0.908/0.954/0.754 on the tuning corpora — near-tied, and not adopted:
+  choosing between near-ties using the held-out corpus would burn its held-out status).
 - **Per-corpus hybrid r@10:** httpx 0.862 · flask 0.955 · bridge 1.0 · ai-digest 1.0
   · click 0.944 — wins or ties vector everywhere.
 - The 38 added questions are deliberately harder than the original 51 (httpx hybrid

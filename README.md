@@ -97,8 +97,8 @@ questions / 5 corpora**, one corpus fully held out from tuning). Mean across cor
 
 | system | recall@5 | recall@10 | mrr |
 |---|---|---|---|
-| naive-rag (structure-blind chunks) | 0.53 | 0.72 | 0.23 |
-| grep over raw source | 0.54 | 0.67 | 0.36 |
+| naive-rag (structure-blind chunks) | 0.52 | 0.72 | 0.23 |
+| grep over raw source | 0.53 | 0.67 | 0.36 |
 | vector (single signal) | 0.85 | 0.93 | 0.71 |
 | **Cartograph hybrid** | **0.88** | **0.95** | **0.74** |
 
