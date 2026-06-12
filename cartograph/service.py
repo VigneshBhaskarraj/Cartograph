@@ -149,6 +149,98 @@ class CartographService:
         """What calls this node (incoming CALLS edges). Accepts an id or qualified name."""
         return self.neighbors(node_id, direction="in", relation="CALLS")
 
+    # -- impact (code <-> data blast radius) -----------------------------------
+    _DATA_KINDS = ("table", "column")
+    _BRIDGE = ("QUERIES", "MAPS_TO")  # code -> data edges
+
+    def _typed_adj(self) -> dict:
+        """Lazy one-time adjacency over typed edges: forward/reverse CALLS and the
+        code->data bridge, all in RAM (built from the graph, never source files)."""
+        if not hasattr(self, "_adj"):
+            calls_fwd: dict[str, list[str]] = {}
+            calls_rev: dict[str, list[str]] = {}
+            to_data: dict[str, list[str]] = {}
+            from_data: dict[str, list[str]] = {}
+            contains: dict[str, list[str]] = {}
+            for src, dst, etype, _conf in self.store.all_edges_typed():
+                if etype == "CALLS":
+                    calls_fwd.setdefault(src, []).append(dst)
+                    calls_rev.setdefault(dst, []).append(src)
+                elif etype in self._BRIDGE:
+                    to_data.setdefault(src, []).append(dst)
+                    from_data.setdefault(dst, []).append(src)
+                elif etype == "CONTAINS":
+                    contains.setdefault(src, []).append(dst)
+            self._adj = {"fwd": calls_fwd, "rev": calls_rev,
+                         "to_data": to_data, "from_data": from_data, "contains": contains}
+        return self._adj
+
+    @staticmethod
+    def _closure(starts: list[str], step: dict[str, list[str]]) -> list[str]:
+        seen, queue = set(starts), list(starts)
+        while queue:
+            for nxt in step.get(queue.pop(), ()):  # BFS order irrelevant for a set
+                if nxt not in seen:
+                    seen.add(nxt)
+                    queue.append(nxt)
+        return [s for s in seen if s not in starts]
+
+    def impact(self, ref: str, max_results: int = 50) -> dict | None:
+        """Blast radius across the code<->data bridge.
+
+        For a table/column: which code touches it directly (QUERIES/MAPS_TO —
+        a mapped class implicates its methods too), and every function that can
+        reach that code through the call graph — i.e. "what application code
+        breaks if this column changes". For code (function/class/module): every
+        table/column reachable through its scope and transitive callees.
+
+        Honesty: the CALLS expansion over-approximates (those edges are
+        INFERRED). The bridge itself can MISS ORM attribute access that has no
+        QUERIES edge, so results are NOT guaranteed supersets; FK/JOIN ripple
+        between tables is not followed. Reads only the graph.
+        """
+        rid = self._rid(ref)
+        if rid is None:
+            return None
+        node = self._node(rid)
+        adj = self._typed_adj()
+
+        def _nodes(ids: list[str]) -> list[dict]:
+            return [n for n in (self._node(i) for i in ids[:max_results]) if n]
+
+        if node["kind"] in self._DATA_KINDS:
+            targets = [rid]
+            if node["kind"] == "table":  # a table change implicates its columns too
+                targets += adj["contains"].get(rid, [])
+            else:  # a column change implicates code mapped to its parent table (ORM)
+                targets += [t for t, cols in adj["contains"].items() if rid in cols
+                            and (p := self.store.get_node(t)) and p["kind"] == "table"]
+            direct = sorted({c for t in targets for c in adj["from_data"].get(t, [])})
+            # The ORM bridge is class-level (MAPS_TO): the mapped class's methods
+            # are implicated too, so they seed the caller closure alongside it.
+            seeds = sorted(set(direct) | {m for c in direct for m in adj["contains"].get(c, [])})
+            transitive = sorted((set(seeds) - set(direct))
+                                | set(self._closure(seeds, adj["rev"]))) if direct else []
+            total = len(direct) + len(transitive)
+            return {"target": node, "direction": "data->code",
+                    "direct_code": _nodes(direct),
+                    "transitive_callers": _nodes(transitive),
+                    "total_code_paths": total,
+                    "truncated": len(direct) > max_results or len(transitive) > max_results}
+
+        # Module/class scope descends CONTAINS first (a module "touches" what its
+        # functions touch), then the call graph expands it.
+        scope = sorted({rid, *self._closure([rid], adj["contains"])})
+        reachable = sorted(set(scope) | set(self._closure(scope, adj["fwd"])))
+        data = sorted({d for c in reachable for d in adj["to_data"].get(c, [])})
+        direct = sorted({d for c in scope for d in adj["to_data"].get(c, [])})
+        rest = [d for d in data if d not in set(direct)]
+        return {"target": node, "direction": "code->data",
+                "direct_data": _nodes(direct),
+                "transitive_data": _nodes(rest),
+                "total_data_touched": len(data),
+                "truncated": len(direct) > max_results or len(rest) > max_results}
+
     def shortest_path(self, src: str, dst: str) -> list[dict]:
         """Ordered nodes on a shortest path between two nodes (ids or qualified names)."""
         s, d = self._rid(src), self._rid(dst)

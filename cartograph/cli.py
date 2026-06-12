@@ -203,6 +203,45 @@ def callers(
 
 
 @app.command()
+def impact(
+    ref: str = typer.Argument(..., help="A table, table.column, or code symbol."),
+    db: str = typer.Option(DEFAULT_DB, help="Kuzu DB path."),
+) -> None:
+    """Blast radius across the code<->data bridge: for a column/table, every
+    function that can reach it ("what breaks if I drop users.email"); for code,
+    every table/column it can touch. Offline, from the graph alone."""
+    svc = _service_or_exit(db)
+    result = svc.impact(ref)
+    if result is None:
+        typer.echo(f"no node matches {ref!r} (try `cartograph resolve`)", err=True)
+        svc.close()
+        raise typer.Exit(1)
+    t = result["target"]
+    typer.echo(f"[{t['kind']}] {t['qualified_name']}  ({result['direction']})")
+    if result["direction"] == "data->code":
+        shown_d, shown_t = len(result["direct_code"]), len(result["transitive_callers"])
+        typer.echo(f"\ndirectly touched by ({shown_d}):")
+        _echo_nodes(result["direct_code"], "  (nothing touches it directly)")
+        typer.echo(f"\nreached through scope/callers ({shown_t}):")
+        _echo_nodes(result["transitive_callers"], "  (no transitive callers)")
+        total = result["total_code_paths"]
+        suffix = f" (showing {shown_d + shown_t} of {total})" if result["truncated"] else ""
+        typer.echo(f"\ntotal code paths affected: {total}{suffix}")
+    else:
+        shown_d, shown_t = len(result["direct_data"]), len(result["transitive_data"])
+        typer.echo(f"\ntouches directly ({shown_d}):")
+        _echo_nodes(result["direct_data"], "  (no direct data access)")
+        typer.echo(f"\ntouches through callees ({shown_t}):")
+        _echo_nodes(result["transitive_data"], "  (none)")
+        total = result["total_data_touched"]
+        suffix = f" (showing {shown_d + shown_t} of {total})" if result["truncated"] else ""
+        typer.echo(f"\ntotal tables/columns touched: {total}{suffix}")
+    typer.echo("\nnote: the CALLS expansion over-approximates (INFERRED edges); the bridge can miss"
+               "\nORM attribute access, and FK/JOIN ripple between tables is not followed.")
+    svc.close()
+
+
+@app.command()
 def path(
     src: str = typer.Argument(..., help="Start symbol (id or qualified name)."),
     dst: str = typer.Argument(..., help="End symbol (id or qualified name)."),

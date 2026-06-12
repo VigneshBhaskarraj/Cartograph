@@ -19,5 +19,5 @@ def test_mcp_server_registers_all_tools(tmp_path):
     tools = {t.name for t in asyncio.run(server.list_tools())}
     assert {
         "query", "semantic_search", "get_node", "resolve",
-        "calls", "callers", "neighbors", "shortest_path",
+        "calls", "callers", "neighbors", "shortest_path", "impact",
     } <= tools

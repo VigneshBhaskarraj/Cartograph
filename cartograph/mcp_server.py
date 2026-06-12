@@ -71,6 +71,17 @@ def build_server(service: CartographService):
         return service.callers(id)
 
     @mcp.tool()
+    def impact(ref: str) -> dict | None:
+        """Blast radius across the code<->data bridge. For a table or table.column:
+        which code touches it directly (a mapped ORM class implicates its methods)
+        and every function that can reach that code ("what breaks if I drop
+        users.email"). For a code symbol: every table/column reachable through its
+        scope and transitive callees. Caveats: the CALLS expansion over-approximates
+        (INFERRED edges), but the bridge can MISS ORM attribute access, and FK/JOIN
+        ripple between tables is not followed — results are not guaranteed supersets."""
+        return service.impact(ref)
+
+    @mcp.tool()
     def shortest_path(src: str, dst: str) -> list[dict]:
         """Ordered nodes on a shortest path between two node ids (e.g. trace how one
         function reaches another). Empty if there is no path."""
