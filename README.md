@@ -58,6 +58,18 @@ Exposes `query` / `semantic_search` / `get_node` / `neighbors` / `calls` / `call
 `shortest_path` so an agent queries structure instead of grepping. Wiring + tool
 reference: [`docs/mcp.md`](./docs/mcp.md).
 
+### The query neither side answers alone: code↔data blast radius
+Code-AI tools stop at code; data-lineage tools stop at SQL. Cartograph holds both in
+one graph, so an agent can ask — fully offline — **"what application code breaks if I
+drop `users.email`?"** and get function-level answers, including transitive callers:
+```bash
+uv run cartograph impact users.email      # column/table -> affected code paths
+uv run cartograph impact store_run        # function -> every table/column it can touch
+```
+Also exposed as the `impact` MCP tool. Honest caveats: the call-graph expansion
+over-approximates (CALLS edges are INFERRED), but the bridge can *miss* ORM attribute
+access, and FK/JOIN ripple between tables isn't followed — useful radius, not a proof.
+
 ### See it
 Export an interactive **3D map** of any indexed graph to a single offline HTML file —
 rotate, search, click a symbol for its callers/callees neighborhood, trace shortest

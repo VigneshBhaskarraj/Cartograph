@@ -15,6 +15,7 @@ no data egress.
 | `callers(id)` | **What calls this node** (incoming CALLS edges only). |
 | `neighbors(id, direction="both", relation="", hops=1)` | Adjacent nodes, each labeled with `relation` and `direction`. Filter by `direction` (out\|in\|both) and `relation` (e.g. CALLS, INHERITS). |
 | `shortest_path(src, dst)` | Ordered nodes on a shortest path between two node ids. |
+| `impact(ref)` | **Blast radius across the code↔data bridge.** For a table/`table.column`: code touching it directly (a mapped ORM class implicates its methods) + every function reaching that code through the call graph ("what breaks if I drop `users.email`"). For code: every table/column reachable through its scope and transitive callees. Caveats: the CALLS expansion over-approximates (INFERRED), but the bridge can *miss* ORM attribute access, and FK/JOIN ripple between tables is not followed — results are not guaranteed supersets. |
 
 Each node result carries `id`, `kind`, `name`, `qualified_name`, `file_path`,
 `start_line`, `signature`, `docstring`, and — where applicable — `score` (ranked

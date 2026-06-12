@@ -286,6 +286,16 @@ Closing the three publish-blockers: no external baseline, no agent benchmark,
 - **Verify:** `uv run python eval/agent_bench/run_bench.py --tools grep|cartograph`
   (needs local Ollama; pilot method + numbers in RESULTS.md).
 
+### G4-1 — `impact`: code↔data blast radius (the moat query) ✅ 2026-06-12
+- **Files:** `cartograph/service.py` (typed adjacency + closures + `impact`),
+  `cartograph/cli.py` (`impact`), `cartograph/mcp_server.py` (tool), docs, README
+- **Does:** for a table/column — direct touchers (QUERIES/MAPS_TO; a mapped class
+  implicates its methods) plus all transitive callers; for code — every
+  table/column reachable through scope + callees. Deterministic ordering,
+  truncation flagged. Honesty caveats recorded: CALLS expansion over-approximates,
+  but the bridge can miss ORM attribute access; FK/JOIN ripple not followed.
+- **Verify:** `uv run pytest tests/test_impact.py -q`
+
 ### G3 open follow-ups
 - ~~Ollama scorecard + sweep-verdict on the expanded 89-question set~~ ✅ 2026-06-11:
   hybrid 0.882/0.952/0.744 vs vector 0.850/0.927/0.714 vs grep 0.535/0.670/0.362
