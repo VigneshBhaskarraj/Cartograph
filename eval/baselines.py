@@ -44,7 +44,7 @@ from evallib import (  # noqa: E402
 
 from cartograph.cache import EmbeddingCache  # noqa: E402
 from cartograph.embed import get_embedder  # noqa: E402
-from cartograph.pipeline import _files  # noqa: E402
+from cartograph.pipeline import TS_JS_SUFFIXES, _files  # noqa: E402
 from cartograph.retrieve import _cosine_ranking  # noqa: E402
 from run_eval import MODE_COLS, PRECISION_MODES  # noqa: E402
 
@@ -69,7 +69,7 @@ class CorpusText:
 
     def __init__(self, src: Path, db: str):
         self.files: dict[str, list[str]] = {}
-        for suffix in (".py", ".sql", ".ts", ".tsx"):
+        for suffix in (".py", ".sql", ".java", ".go", *TS_JS_SUFFIXES):
             for f in _files(src, suffix):
                 rel = f.relative_to(src.parent).as_posix()
                 self.files[rel] = f.read_text(encoding="utf-8", errors="replace").splitlines()

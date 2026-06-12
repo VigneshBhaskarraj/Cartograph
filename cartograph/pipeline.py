@@ -19,7 +19,7 @@ TS_JS_SUFFIXES = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")
 # (Hidden dirs are skipped wholesale; `venv`/`env` only when they really are a
 # virtualenv, so a legitimate source package named `env` still gets indexed.)
 SKIP_DIRS = {"__pycache__", "node_modules", "site-packages", ".eggs",
-             "dist", "build"}
+             "dist", "build", "vendor", "target"}
 VENV_NAMES = {"venv", "env"}
 
 
@@ -90,10 +90,23 @@ def build_graph(path: Path, resolver: str = "heuristic") -> Graph:
             graph.edges.extend(tsg.edges)
         except ModuleNotFoundError:
             pass  # tree-sitter-typescript not installed; skip (install with `--extra ts`)
+    # Every language extractor mints external stubs as ext::<target>; a polyglot
+    # repo (import redis + require('redis')) would hit a duplicate-primary-key
+    # crash at load. Same id = same external package — keep the first.
+    seen_ids: set[str] = set()
+    deduped = []
+    for n in graph.nodes:
+        if n.id in seen_ids:
+            continue
+        seen_ids.add(n.id)
+        deduped.append(n)
+    graph.nodes = deduped
     _extract_embedded_sql(graph)
     _bridge_models_to_tables(graph)
     if not graph.nodes:
-        raise FileNotFoundError(f"no Python or SQL files under {path}")
+        raise FileNotFoundError(
+            f"no supported source files (.py/.js/.ts/.java/.go/.sql) under {path} — "
+            "language extras may be missing (see README)")
     return graph
 
 
@@ -102,7 +115,9 @@ def _dedup_schema(schema: Graph) -> Graph:
     DB dialect — spring-petclinic ships h2+mysql+postgres). Duplicate table/column
     nodes split the code<->data bridge: MAPS_TO attaches to one copy while a query
     resolves the other. Keep the first node per (kind, qualified_name) and remap
-    edges onto the keepers."""
+    edges onto the keepers. Known limit: same-named tables in genuinely
+    DIFFERENT schemas (multi-service monorepos) merge too — scope the index
+    path per service if that matters."""
     keep: dict[tuple[str, str], str] = {}
     remap: dict[str, str] = {}
     nodes = []
@@ -209,6 +224,7 @@ def _bridge_models_to_tables(graph: Graph) -> None:
         if n.kind == "table":
             by_name.setdefault(n.name, n)
     seen = {(e.type, e.src, e.dst) for e in graph.edges}
+    cols = {c.qualified_name: c for c in graph.nodes if c.kind == "column"}
     for n in graph.nodes:
         tn = n.extra.get("tablename") if n.kind == "class" else None
         if not tn:
@@ -216,17 +232,17 @@ def _bridge_models_to_tables(graph: Graph) -> None:
         tgt = by_qual.get(tn) or by_name.get(tn.rsplit(".", 1)[-1])
         if tgt is None:
             continue
+        conf = n.extra.get("tablename_confidence", EXTRACTED)
         if ("MAPS_TO", n.id, tgt.id) not in seen:
             seen.add(("MAPS_TO", n.id, tgt.id))
-            graph.edges.append(Edge("MAPS_TO", n.id, tgt.id, EXTRACTED))
+            graph.edges.append(Edge("MAPS_TO", n.id, tgt.id, conf))
         # Column-level mapping (JPA @Column): entity class -> table.column nodes.
         if n.extra.get("columns"):
-            cols = {c.qualified_name: c for c in graph.nodes if c.kind == "column"}
             for col in n.extra["columns"]:
                 cn = cols.get(f"{tgt.name}.{col}") or cols.get(f"{tgt.qualified_name}.{col}")
                 if cn is not None and ("MAPS_TO", n.id, cn.id) not in seen:
                     seen.add(("MAPS_TO", n.id, cn.id))
-                    graph.edges.append(Edge("MAPS_TO", n.id, cn.id, EXTRACTED))
+                    graph.edges.append(Edge("MAPS_TO", n.id, cn.id, conf))
 
 
 def embed_graph(graph: Graph, embedder=None, cache: EmbeddingCache | None = None) -> tuple[int, int]:

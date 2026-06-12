@@ -130,12 +130,15 @@ class _JavaFile:
         self.edges.append(Edge("CONTAINS", parent_id, node.id, EXTRACTED))
         annos = self._annotations(decl)
         if "Entity" in annos or "Table" in annos:
-            # explicit @Table name wins; bare @Entity defaults to the lowercased
-            # class name (Hibernate's common naming) — still EXTRACTED, it is
-            # declared mapping, not a guess about behavior
-            node.extra["tablename"] = (annos.get("Table", {}).get("name")
-                                       or annos.get("Table", {}).get("value")
-                                       or name.lower())
+            explicit = annos.get("Table", {}).get("name") or annos.get("Table", {}).get("value")
+            if explicit:
+                node.extra["tablename"] = explicit
+                node.extra["tablename_confidence"] = EXTRACTED  # declared mapping
+            else:
+                # bare @Entity: the table name depends on the naming strategy
+                # (Spring Boot snake_cases) — a guess, so honestly INFERRED
+                node.extra["tablename"] = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name).lower()
+                node.extra["tablename_confidence"] = INFERRED
             node.extra["columns"] = []
         sup = next((c for c in decl.children if c.type == "superclass"), None)
         if sup is not None:
@@ -174,6 +177,8 @@ class _JavaFile:
                                or field)
                         if col:
                             owner.extra["columns"].append(col)
+            elif m.type == "enum_body_declarations":  # enum methods live one level down
+                self._type_body(m, owner, enclosing_qual)
             elif m.type in _TYPE_DECLS:  # nested/inner types carry true scope
                 self._type_decl(m, owner.id, enclosing_qual)
 

@@ -132,7 +132,14 @@ class _TsFile:
         left, right = expr.child_by_field_name("left"), expr.child_by_field_name("right")
         if left is None or right is None or right.type not in ("function_expression", "function", "arrow_function"):
             return
-        segments = [s for s in self._text(left).split(".") if s and s.isidentifier()]
+        if left.type not in ("member_expression", "identifier"):
+            return  # obj[key] = fn etc. — no stable dotted path to name it by
+        raw = self._text(left).split(".")
+        if raw and raw[0] == "this":
+            return  # this.x = fn inside a constructor isn't a module-level symbol
+        segments = [s for s in raw if s and s.isidentifier()]
+        if len(segments) != len(raw):
+            return  # any non-identifier segment means a computed/odd path
         is_proto = "prototype" in segments
         cleaned = [s for s in segments if s not in self._PATH_NOISE]
         if not cleaned:  # bare `module.exports = function` — use the fn's own name if any

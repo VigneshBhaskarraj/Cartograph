@@ -81,3 +81,32 @@ def test_jpa_impact_blast_radius(tmp_path):
     quals = {n["qualified_name"] for n in r["direct_code"] + r["transitive_callers"]}
     assert any(q.endswith(".Order") for q in quals)
     assert any(q.endswith("Order.isPaid") for q in quals)  # entity method implicated
+
+
+def test_enum_methods_extracted(tmp_path):
+    """Review finding: enum methods live under enum_body_declarations."""
+    (tmp_path / "Color.java").write_text(
+        "package x;\n"
+        "enum Color {\n"
+        "    RED, GREEN;\n"
+        "    public String label() { return name().toLowerCase(); }\n"
+        "}\n")
+    g = build_graph(tmp_path)
+    quals = {n.qualified_name for n in g.nodes}
+    assert "x.Color.label" in quals
+
+
+def test_bare_entity_default_mapping_is_inferred(tmp_path):
+    """Review finding: without @Table the name is a naming-strategy guess —
+    the MAPS_TO must say INFERRED, and multi-word entities snake_case."""
+    pytest.importorskip("sqlglot")
+    (tmp_path / "OwnerPet.java").write_text(
+        "package x;\nimport javax.persistence.Entity;\n"
+        "@Entity\npublic class OwnerPet {}\n")
+    (tmp_path / "schema.sql").write_text(
+        "CREATE TABLE owner_pet (id INTEGER PRIMARY KEY);\n")
+    g = build_graph(tmp_path)
+    by_id = {n.id: n for n in g.nodes}
+    maps = [(by_id[e.src].name, by_id[e.dst].name, e.confidence)
+            for e in g.edges if e.type == "MAPS_TO"]
+    assert ("OwnerPet", "owner_pet", "INFERRED") in maps

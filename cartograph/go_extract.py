@@ -40,6 +40,9 @@ class _GoFile:
         self.imports: list[tuple[str, str]] = []        # (module_id, path)
         self.module_node: Node | None = None
         self.types: dict[str, Node] = {}                # local type name -> node
+        # receiver-method ownership is resolved in the cross-file join phase:
+        # the receiver type often lives in another file of the same package
+        self.pending_owns: list[tuple[str, str]] = []   # (method_id, owner_qual)
 
     def _text(self, n) -> str:
         return self.src[n.start_byte:n.end_byte].decode("utf-8", "replace")
@@ -142,10 +145,10 @@ class _GoFile:
         name = self._text(name_n)
         qual = f"{scope}.{recv_type}.{name}" if recv_type else f"{scope}.{name}"
         meth = self._node("method" if recv_type else "function", name, qual, decl)
-        owner = self.types.get(recv_type) if recv_type else None
-        self.edges.append(Edge("CONTAINS",
-                               owner.id if owner is not None else self.module_node.id,
-                               meth.id, EXTRACTED))
+        if recv_type:
+            self.pending_owns.append((meth.id, f"{scope}.{recv_type}"))
+        else:
+            self.edges.append(Edge("CONTAINS", self.module_node.id, meth.id, EXTRACTED))
         body = decl.child_by_field_name("body")
         if body is not None:
             self._collect_calls(body, meth.id, receiver_var=recv_var)
@@ -189,6 +192,16 @@ def extract_go_paths(paths: list[Path], root: Path) -> Graph:
     by_id = {n.id: n for n in nodes}
     edges: list[Edge] = list({(e.type, e.src, e.dst): e for f in files for e in f.edges}.values())
     seen = {(e.type, e.src, e.dst) for e in edges}
+
+    # Attach receiver methods to their type across files of the same package.
+    type_index = {n.qualified_name: n for n in nodes if n.kind in ("class", "interface")}
+    for f in files:
+        for meth_id, owner_qual in f.pending_owns:
+            owner = type_index.get(owner_qual)
+            parent = owner.id if owner is not None else f.module_node.id
+            if ("CONTAINS", parent, meth_id) not in seen:
+                seen.add(("CONTAINS", parent, meth_id))
+                edges.append(Edge("CONTAINS", parent, meth_id, EXTRACTED))
 
     def _type_of(n: Node) -> str | None:
         return n.qualified_name.rsplit(".", 1)[0] if n.kind == "method" else None

@@ -1,0 +1,54 @@
+# Java eval set over spring-petclinic (pinned, .corpus/petclinic/src/main),
+# indexed at cartograph-out/petclinic.kuzu. `anchors` are dotted qualified-name
+# suffixes (table/column anchors use schema quals like `owners`, `owners.city`);
+# a question is a hit if ANY anchor node appears in the retriever's top-k.
+# Authored by reading the Java source only (no retrieval runs); anchors
+# confirmed against the pinned index via resolve_anchors.
+- id: 1
+  question: "Which entity classes extend Person?"
+  mode: STRUCT
+  anchors: ["owner.Owner", "vet.Vet"]
+- id: 2
+  question: "What does Owner.addVisit call to attach the visit to the right pet?"
+  mode: STRUCT
+  anchors: ["Owner.getPet", "Pet.addVisit"]
+- id: 3
+  question: "What does VetController.showVetList call to fetch and paginate the list of vets?"
+  mode: STRUCT
+  anchors: ["VetController.findPaginated", "VetRepository.findAll", "VetController.addPaginationModel"]
+- id: 4
+  question: "Trace the path from OwnerController.processFindForm down to the Spring Data query that matches owners by last name."
+  mode: MULTIHOP
+  anchors: ["OwnerController.processFindForm", "OwnerController.findPaginatedForOwnersLastName", "OwnerRepository.findByLastNameStartingWith"]
+- id: 5
+  question: "How does a visit booked through VisitController's POST handler end up in the pet's collection of visits?"
+  mode: MULTIHOP
+  anchors: ["VisitController.processNewVisitForm", "Owner.addVisit", "Pet.addVisit"]
+- id: 6
+  question: "Where does the application deliberately fail at runtime so developers can see how the error page renders?"
+  mode: SEMANTIC
+  anchors: ["CrashController", "CrashController.triggerException"]
+- id: 7
+  question: "Where does the app check a submitted pet form and reject it when details like the animal's birthday are missing?"
+  mode: SEMANTIC
+  anchors: ["PetValidator", "PetValidator.validate"]
+- id: 8
+  question: "Where does the app keep the list of veterinarians in memory so repeat page loads don't hit the database again?"
+  mode: SEMANTIC
+  anchors: ["CacheConfiguration", "VetRepository.findAll"]
+- id: 9
+  question: "Show me BaseEntity and its isNew method."
+  mode: EXACT
+  anchors: ["BaseEntity", "BaseEntity.isNew"]
+- id: 10
+  question: "Where is the Vets wrapper class with its getVetList method defined?"
+  mode: EXACT
+  anchors: ["vet.Vets", "Vets.getVetList"]
+- id: 11
+  question: "Which entity class maps to the owners table?"
+  mode: CROSS
+  anchors: ["owner.Owner", "owners"]
+- id: 12
+  question: "If we rename the visit_date column in the visits table, which entity code is implicated?"
+  mode: CROSS
+  anchors: ["visits.visit_date", "owner.Visit", "Visit.getDate"]

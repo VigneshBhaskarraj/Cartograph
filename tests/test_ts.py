@@ -112,3 +112,28 @@ def test_commonjs_patterns(tmp_path):
     assert ("app", "util") in imports                         # require('./util')
     calls = {(by_id[e.src].name, by_id[e.dst].name) for e in g.edges if e.type == "CALLS"}
     assert ("createApp", "Router") in calls
+
+
+def test_polyglot_external_stub_dedup(tmp_path):
+    """Review HIGH: import redis (py) + require('redis') (js) minted the same
+    ext::redis primary key and crashed indexing on polyglot repos."""
+    pytest.importorskip("tree_sitter_javascript")
+    from cartograph.pipeline import index_path
+
+    (tmp_path / "a.py").write_text("import redis\n\ndef f():\n    return 1\n")
+    (tmp_path / "b.js").write_text("var redis = require('redis');\nfunction g() { return 1; }\n")
+    store = index_path(tmp_path, tmp_path / "g.kuzu", dim=16, overwrite=True)
+    counts = store.counts()
+    store.close()
+    assert counts.get("node:external", 0) == 1  # one stub, indexed without crashing
+
+
+def test_js_this_and_computed_assignments_skipped(tmp_path):
+    pytest.importorskip("tree_sitter_javascript")
+    (tmp_path / "a.js").write_text(
+        "function Ctor() {\n  this.x = function () { return 1; };\n}\n"
+        "var obj = {};\nvar key = 'k';\nobj[key] = function dyn() { return 2; };\n")
+    g = build_graph(tmp_path)
+    names = {n.name for n in g.nodes if n.kind in ("function", "method")}
+    assert "Ctor" in names
+    assert "x" not in names and "dyn" not in names  # junk paths skipped
