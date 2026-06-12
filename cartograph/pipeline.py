@@ -11,6 +11,8 @@ from .extract import extract_paths
 from .model import Graph
 from .store import DEFAULT_DIM, SCHEMA_VERSION, Store
 
+TS_JS_SUFFIXES = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")
+
 
 # Indexing a project root must not sweep up its virtualenv, vendored deps, or VCS
 # internals — embedding a .venv costs hours of Ollama time and poisons retrieval.
@@ -43,7 +45,7 @@ def _file_digests(path: Path) -> dict[str, str]:
     """{repo-relative path: sha256(content)} for every indexed source file."""
     pkg_parent = path.parent
     out: dict[str, str] = {}
-    for f in _files(path, ".py") + _files(path, ".sql") + _files(path, ".ts") + _files(path, ".tsx"):
+    for f in (f for suf in (".py", ".sql", *TS_JS_SUFFIXES) for f in _files(path, suf)):
         rel = f.relative_to(pkg_parent).as_posix() if f.is_relative_to(pkg_parent) else f.name
         out[rel] = hashlib.sha256(f.read_bytes()).hexdigest()
     return out
@@ -61,7 +63,7 @@ def build_graph(path: Path, resolver: str = "heuristic") -> Graph:
             graph.edges.extend(schema.edges)
         except ModuleNotFoundError:
             pass  # sqlglot not installed; skip SQL (install with `--extra sql`)
-    ts_files = _files(path, ".ts") + _files(path, ".tsx")
+    ts_files = [f for suf in TS_JS_SUFFIXES for f in _files(path, suf)]
     if ts_files:
         try:
             from .ts_extract import extract_ts_paths

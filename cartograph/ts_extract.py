@@ -1,9 +1,12 @@
 """tree-sitter extraction for TypeScript/JavaScript -> the same graph model.
 
 Proves the architecture extends past Python (SPEC non-goal: no breadth yet, but the
-seam should be clean). Optional `ts` extra (tree-sitter-typescript). Produces module/
-class/interface/function/method nodes with CONTAINS, INHERITS (extends/implements),
-IMPORTS, and heuristic INFERRED CALLS — mirroring the Python extractor. No network.
+seam should be clean). Optional `ts` extra (tree-sitter-typescript +
+tree-sitter-javascript). Handles .ts/.tsx/.js/.jsx/.mjs/.cjs — the JS grammar shares
+the node-type vocabulary this walker uses (TS-only kinds like interfaces simply never
+appear in JS trees). Produces module/class/interface/function/method nodes with
+CONTAINS, INHERITS (extends/implements), IMPORTS, and heuristic INFERRED CALLS —
+mirroring the Python extractor. No network.
 """
 
 from __future__ import annotations
@@ -14,14 +17,24 @@ from pathlib import Path
 
 from .model import EXTRACTED, INFERRED, Edge, Graph, Node
 
+JS_SUFFIXES = (".js", ".jsx", ".mjs", ".cjs")
 
-def _langs():
+
+def _parsers(need_js: bool):
+    """suffix -> Parser. The JS grammar is imported only when a JS file exists, so
+    a TypeScript-only environment never needs it."""
     import tree_sitter_typescript as tsts
     from tree_sitter import Language, Parser
 
     ts = Parser(Language(tsts.language_typescript()))
     tsx = Parser(Language(tsts.language_tsx()))
-    return ts, tsx
+    out = {".ts": ts, ".tsx": tsx}
+    if need_js:
+        import tree_sitter_javascript as tsjs
+
+        js = Parser(Language(tsjs.language()))
+        out.update({s: js for s in JS_SUFFIXES})
+    return out
 
 
 def _sha(t: str) -> str:
@@ -95,6 +108,9 @@ class _TsFile:
                     self.edges.append(Edge("CONTAINS", parent_id, iface.id, EXTRACTED))
             elif t == "lexical_declaration" or t == "variable_declaration":
                 self._arrow_consts(c, parent_id, class_qual)
+            elif t == "expression_statement":
+                self._assignment_fn(c, parent_id)
+                self._walk(c, parent_id, class_qual)
             elif t == "import_statement":
                 src = c.child_by_field_name("source")
                 if src is not None:
@@ -102,19 +118,60 @@ class _TsFile:
             else:
                 self._walk(c, parent_id, class_qual)
 
+    # CommonJS noise segments stripped from assignment paths: `exports.init`,
+    # `module.exports.x`, and `Route.prototype.dispatch` name the function/method,
+    # not a real object hierarchy.
+    _PATH_NOISE = ("module", "exports", "prototype")
+
+    def _assignment_fn(self, stmt, parent_id) -> None:
+        """CommonJS-style definitions: `exports.f = function`, `app.x = () => …`,
+        `Foo.prototype.m = function` — most pre-ES6 Node code defines this way."""
+        expr = next((c for c in stmt.named_children if c.type == "assignment_expression"), None)
+        if expr is None:
+            return
+        left, right = expr.child_by_field_name("left"), expr.child_by_field_name("right")
+        if left is None or right is None or right.type not in ("function_expression", "function", "arrow_function"):
+            return
+        segments = [s for s in self._text(left).split(".") if s and s.isidentifier()]
+        is_proto = "prototype" in segments
+        cleaned = [s for s in segments if s not in self._PATH_NOISE]
+        if not cleaned:  # bare `module.exports = function` — use the fn's own name if any
+            nm = right.child_by_field_name("name")
+            if nm is None:
+                return
+            cleaned = [self._text(nm)]
+        name = cleaned[-1]
+        kind = "method" if is_proto and len(cleaned) > 1 else "function"
+        qual = f"{self.module}." + ".".join(cleaned)
+        fn = self._node(kind, name, qual, expr)
+        self.edges.append(Edge("CONTAINS", parent_id, fn.id, EXTRACTED))
+        body = right.child_by_field_name("body")
+        if body is not None:
+            self._collect_calls(body, fn.id)
+
     def _arrow_consts(self, node, parent_id, class_qual) -> None:
         for vd in node.children:
             if vd.type != "variable_declarator":
                 continue
             name_n = vd.child_by_field_name("name")
             val = vd.child_by_field_name("value")
-            if name_n is not None and val is not None and val.type in ("arrow_function", "function_expression"):
+            if name_n is None or val is None:
+                continue
+            if val.type in ("arrow_function", "function_expression", "function"):
                 qual = f"{self.module}.{self._text(name_n)}"
                 fn = self._node("function", self._text(name_n), qual, vd)
                 self.edges.append(Edge("CONTAINS", parent_id, fn.id, EXTRACTED))
                 body = val.child_by_field_name("body")
                 if body is not None:
                     self._collect_calls(body, fn.id)
+            elif val.type == "call_expression":  # const x = require('pkg')
+                callee = val.child_by_field_name("function")
+                args = val.child_by_field_name("arguments")
+                if (callee is not None and self._text(callee) == "require"
+                        and args is not None and args.named_children
+                        and args.named_children[0].type == "string"):
+                    self.imports.append(
+                        (self.module_node.id, self._text(args.named_children[0]).strip("\"'`")))
 
     def _fn(self, node, parent_id, class_qual) -> None:
         nm = node.child_by_field_name("name")
@@ -182,13 +239,13 @@ def _iter(node):
 
 
 def extract_ts_paths(paths: list[Path], root: Path) -> Graph:
-    ts, tsx = _langs()
+    parsers = _parsers(need_js=any(p.suffix in JS_SUFFIXES for p in paths))
     pkg_parent = root.parent
     files: list[_TsFile] = []
     for path in paths:
         rel = path.relative_to(pkg_parent).as_posix() if path.is_relative_to(pkg_parent) else path.name
         src = path.read_bytes()
-        parser = tsx if path.suffix == ".tsx" else ts
+        parser = parsers[path.suffix]
         fx = _TsFile(src, rel)
         fx.run(parser.parse(src).root_node)
         files.append(fx)
