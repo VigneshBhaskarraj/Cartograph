@@ -58,6 +58,15 @@ Exposes `query` / `semantic_search` / `get_node` / `neighbors` / `calls` / `call
 `shortest_path` so an agent queries structure instead of grepping. Wiring + tool
 reference: [`docs/mcp.md`](./docs/mcp.md).
 
+### See it
+Export an interactive **3D map** of any indexed graph to a single offline HTML file —
+rotate, search, click a symbol for its callers/callees neighborhood, trace shortest
+paths, filter edge types and EXTRACTED/INFERRED confidence. Zero network calls,
+no libraries, shareable as one file (`?embed=1` for a clean embed view):
+```bash
+uv run cartograph viz --db cartograph-out/graph.kuzu --out graph.html
+```
+
 ### Measure it — including against the alternatives
 Retrieval quality is measured, never asserted (see `CLAUDE.md`). The one-command
 dashboard indexes five corpora (89 questions — one corpus held out from all tuning)
