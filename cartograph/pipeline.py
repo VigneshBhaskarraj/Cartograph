@@ -11,13 +11,15 @@ from .extract import extract_paths
 from .model import Graph
 from .store import DEFAULT_DIM, SCHEMA_VERSION, Store
 
+TS_JS_SUFFIXES = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")
+
 
 # Indexing a project root must not sweep up its virtualenv, vendored deps, or VCS
 # internals — embedding a .venv costs hours of Ollama time and poisons retrieval.
 # (Hidden dirs are skipped wholesale; `venv`/`env` only when they really are a
 # virtualenv, so a legitimate source package named `env` still gets indexed.)
 SKIP_DIRS = {"__pycache__", "node_modules", "site-packages", ".eggs",
-             "dist", "build"}
+             "dist", "build", "vendor", "target"}
 VENV_NAMES = {"venv", "env"}
 
 
@@ -43,7 +45,7 @@ def _file_digests(path: Path) -> dict[str, str]:
     """{repo-relative path: sha256(content)} for every indexed source file."""
     pkg_parent = path.parent
     out: dict[str, str] = {}
-    for f in _files(path, ".py") + _files(path, ".sql") + _files(path, ".ts") + _files(path, ".tsx"):
+    for f in (f for suf in (".py", ".sql", ".java", ".go", *TS_JS_SUFFIXES) for f in _files(path, suf)):
         rel = f.relative_to(pkg_parent).as_posix() if f.is_relative_to(pkg_parent) else f.name
         out[rel] = hashlib.sha256(f.read_bytes()).hexdigest()
     return out
@@ -56,12 +58,30 @@ def build_graph(path: Path, resolver: str = "heuristic") -> Graph:
     if sql_files:
         try:
             from .sql_extract import extract_sql_paths
-            schema = extract_sql_paths(sql_files, root=path)
+            schema = _dedup_schema(extract_sql_paths(sql_files, root=path))
             graph.nodes.extend(schema.nodes)
             graph.edges.extend(schema.edges)
         except ModuleNotFoundError:
             pass  # sqlglot not installed; skip SQL (install with `--extra sql`)
-    ts_files = _files(path, ".ts") + _files(path, ".tsx")
+    java_files = _files(path, ".java")
+    if java_files:
+        try:
+            from .java_extract import extract_java_paths
+            jg = extract_java_paths(java_files, root=path)
+            graph.nodes.extend(jg.nodes)
+            graph.edges.extend(jg.edges)
+        except ModuleNotFoundError:
+            pass  # tree-sitter-java not installed; skip (install with `--extra java`)
+    go_files = _files(path, ".go")
+    if go_files:
+        try:
+            from .go_extract import extract_go_paths
+            gg = extract_go_paths(go_files, root=path)
+            graph.nodes.extend(gg.nodes)
+            graph.edges.extend(gg.edges)
+        except ModuleNotFoundError:
+            pass  # tree-sitter-go not installed; skip (install with `--extra go`)
+    ts_files = [f for suf in TS_JS_SUFFIXES for f in _files(path, suf)]
     if ts_files:
         try:
             from .ts_extract import extract_ts_paths
@@ -70,11 +90,54 @@ def build_graph(path: Path, resolver: str = "heuristic") -> Graph:
             graph.edges.extend(tsg.edges)
         except ModuleNotFoundError:
             pass  # tree-sitter-typescript not installed; skip (install with `--extra ts`)
+    # Every language extractor mints external stubs as ext::<target>; a polyglot
+    # repo (import redis + require('redis')) would hit a duplicate-primary-key
+    # crash at load. Same id = same external package — keep the first.
+    seen_ids: set[str] = set()
+    deduped = []
+    for n in graph.nodes:
+        if n.id in seen_ids:
+            continue
+        seen_ids.add(n.id)
+        deduped.append(n)
+    graph.nodes = deduped
     _extract_embedded_sql(graph)
     _bridge_models_to_tables(graph)
     if not graph.nodes:
-        raise FileNotFoundError(f"no Python or SQL files under {path}")
+        raise FileNotFoundError(
+            f"no supported source files (.py/.js/.ts/.java/.go/.sql) under {path} — "
+            "language extras may be missing (see README)")
     return graph
+
+
+def _dedup_schema(schema: Graph) -> Graph:
+    """The same logical table often appears in several .sql files (one schema per
+    DB dialect — spring-petclinic ships h2+mysql+postgres). Duplicate table/column
+    nodes split the code<->data bridge: MAPS_TO attaches to one copy while a query
+    resolves the other. Keep the first node per (kind, qualified_name) and remap
+    edges onto the keepers. Known limit: same-named tables in genuinely
+    DIFFERENT schemas (multi-service monorepos) merge too — scope the index
+    path per service if that matters."""
+    keep: dict[tuple[str, str], str] = {}
+    remap: dict[str, str] = {}
+    nodes = []
+    for n in schema.nodes:
+        key = (n.kind, n.qualified_name)
+        if key in keep:
+            remap[n.id] = keep[key]
+        else:
+            keep[key] = n.id
+            nodes.append(n)
+    edges, seen = [], set()
+    for e in schema.edges:
+        src, dst = remap.get(e.src, e.src), remap.get(e.dst, e.dst)
+        if src == dst or (e.type, src, dst) in seen:
+            continue
+        seen.add((e.type, src, dst))
+        e.src, e.dst = src, dst
+        edges.append(e)
+    schema.nodes, schema.edges = nodes, edges
+    return schema
 
 
 def _extract_embedded_sql(graph: Graph) -> None:
@@ -161,14 +224,25 @@ def _bridge_models_to_tables(graph: Graph) -> None:
         if n.kind == "table":
             by_name.setdefault(n.name, n)
     seen = {(e.type, e.src, e.dst) for e in graph.edges}
+    cols = {c.qualified_name: c for c in graph.nodes if c.kind == "column"}
     for n in graph.nodes:
         tn = n.extra.get("tablename") if n.kind == "class" else None
         if not tn:
             continue
         tgt = by_qual.get(tn) or by_name.get(tn.rsplit(".", 1)[-1])
-        if tgt is not None and ("MAPS_TO", n.id, tgt.id) not in seen:
+        if tgt is None:
+            continue
+        conf = n.extra.get("tablename_confidence", EXTRACTED)
+        if ("MAPS_TO", n.id, tgt.id) not in seen:
             seen.add(("MAPS_TO", n.id, tgt.id))
-            graph.edges.append(Edge("MAPS_TO", n.id, tgt.id, EXTRACTED))
+            graph.edges.append(Edge("MAPS_TO", n.id, tgt.id, conf))
+        # Column-level mapping (JPA @Column): entity class -> table.column nodes.
+        if n.extra.get("columns"):
+            for col in n.extra["columns"]:
+                cn = cols.get(f"{tgt.name}.{col}") or cols.get(f"{tgt.qualified_name}.{col}")
+                if cn is not None and ("MAPS_TO", n.id, cn.id) not in seen:
+                    seen.add(("MAPS_TO", n.id, cn.id))
+                    graph.edges.append(Edge("MAPS_TO", n.id, cn.id, conf))
 
 
 def embed_graph(graph: Graph, embedder=None, cache: EmbeddingCache | None = None) -> tuple[int, int]:

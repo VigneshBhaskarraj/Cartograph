@@ -5,6 +5,7 @@ import pytest
 pytest.importorskip("sqlglot")
 
 from cartograph.service import CartographService  # noqa: E402
+from cartograph.pipeline import build_graph  # noqa: E402
 from cartograph.sql_extract import extract_sql_paths  # noqa: E402
 
 SQL = Path(__file__).parent / "fixtures" / "schema.sql"
@@ -67,3 +68,20 @@ def test_sql_indexed_into_same_graph(tmp_path):
     fk = svc.neighbors("orders.user_id", direction="out", relation="REFERENCES")
     assert any(n["name"] == "users" for n in fk)
     svc.close()
+
+
+def test_same_table_across_dialect_files_dedups(tmp_path):
+    """petclinic-style repos ship one schema per DB dialect; duplicates split the
+    code<->data bridge (MAPS_TO on one copy, queries resolving the other)."""
+    (tmp_path / "h2.sql").write_text("CREATE TABLE owners (id INTEGER PRIMARY KEY, city TEXT);\n")
+    (tmp_path / "mysql.sql").write_text("CREATE TABLE owners (id INTEGER PRIMARY KEY, city TEXT);\n")
+    (tmp_path / "app.py").write_text(
+        'class Owner:\n    __tablename__ = "owners"\n')
+    g = build_graph(tmp_path)
+    tables = [n for n in g.nodes if n.kind == "table" and n.name == "owners"]
+    assert len(tables) == 1
+    cols = [n for n in g.nodes if n.kind == "column" and n.qualified_name == "owners.city"]
+    assert len(cols) == 1
+    by_id = {n.id: n for n in g.nodes}
+    maps = [(by_id[e.src].name, by_id[e.dst].name) for e in g.edges if e.type == "MAPS_TO"]
+    assert ("Owner", "owners") in maps

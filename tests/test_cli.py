@@ -56,7 +56,7 @@ def test_index_empty_dir_is_friendly(tmp_path):
     src.mkdir()
     r = runner.invoke(app, ["index", str(src), "--db", str(tmp_path / "g.kuzu")])
     assert r.exit_code == 1
-    assert "no Python or SQL files" in r.output
+    assert "no supported source files" in r.output
 
 
 def test_index_skips_venv_and_vendored_dirs(tmp_path):

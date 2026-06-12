@@ -7,7 +7,7 @@ Built as a privacy-first, correctness-first alternative to cloud GraphRAG code t
 > **Status:** early development. See [`SPEC.md`](./SPEC.md) for the design and [`docs/eval-set-httpx.md`](./docs/eval-set-httpx.md) for the evaluation methodology.
 
 ## How it works
-- **tree-sitter** extracts code structure locally (Python + TypeScript); SQL schemas are parsed deterministically — app code and DB schema land in one graph.
+- **tree-sitter** extracts code structure locally — **Python, JavaScript/TypeScript (incl. CommonJS), Java (incl. JPA annotations), Go**; SQL schemas are parsed deterministically — app code and DB schema land in one graph.
 - **Kuzu** stores it all: a property graph in a single embedded file. (Vector search is currently exact brute-force cosine — deliberate, fully offline; Kuzu HNSW is the planned speed-only upgrade.)
 - **Hybrid retrieval** fuses vector similarity, graph traversal (personalized PageRank), and BM25 keyword search with weighted RRF, plus an opt-in local-LLM reranker.
 - A **local embedding model** (Ollama) and an optional **local LLM** mean zero network calls by default — enforced, not promised: a non-loopback `OLLAMA_HOST` is refused unless explicitly allowed.
@@ -17,7 +17,7 @@ Built as a privacy-first, correctness-first alternative to cloud GraphRAG code t
 Runs on macOS and Linux, Python 3.12+ — everything works offline.
 ```bash
 # as a tool (recommended for using it on your repos; sql/ts extras enable those extractors):
-uv tool install "cartograph[mcp,sql,ts] @ git+https://github.com/VigneshBhaskarraj/Cartograph"
+uv tool install "cartograph[mcp,sql,ts,java,go] @ git+https://github.com/VigneshBhaskarraj/Cartograph"
 cartograph --help    # tool installs use plain `cartograph`, no `uv run` prefix
 
 # or for development:
@@ -26,9 +26,17 @@ uv sync --all-extras
 uv run pytest        # the whole suite runs offline and deterministically
 ```
 
+## Language support (honest tiers)
+| tier | languages | what it means |
+|---|---|---|
+| **Evaluated** | Python (+SQL bridge), Java (+JPA bridge) | retrieval quality measured on real corpora with question sets |
+| **Structural** | TypeScript, JavaScript (ES+CommonJS), Go | extraction verified by tests + real-repo smoke (Express, go-chi); no retrieval-quality numbers yet |
+
+Further languages are demand-driven — file an issue.
+
 ## Quickstart
 ```bash
-# Index any Python/TypeScript/SQL file or package, then query the graph
+# Index any Python/JS/TS/Java/Go/SQL file or package, then query the graph
 uv run cartograph index path/to/pkg --db cartograph-out/graph.kuzu
 uv run cartograph query "what calls encode_request" --mode hybrid --k 8
 ```
