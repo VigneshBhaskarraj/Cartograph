@@ -30,3 +30,15 @@
   question: "Where are run statistics computed from the database?"
   mode: CROSS
   anchors: ["get_stats", "runs"]
+- id: 8
+  question: "Which functions write to and read from the signal_surge table?"
+  mode: CROSS
+  anchors: ["signal_surge", "store_run", "get_recent_context"]
+- id: 9
+  question: "Which table stores the leader quotes captured for each run, and what code inserts them?"
+  mode: CROSS
+  anchors: ["leaders", "store_run"]
+- id: 10
+  question: "What code scans digest text for known company and person names and records them in the database?"
+  mode: SEMANTIC+CROSS
+  anchors: ["_extract_and_store_entities", "entities"]

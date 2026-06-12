@@ -1,0 +1,103 @@
+# Gate-3 agent-benchmark tasks: realistic code-navigation jobs with objective,
+# source-verified answers. Success = the agent's final answer names a gold symbol
+# (case-insensitive substring). Authored by reading the corpus source — never by
+# testing what any retriever finds.
+#
+# corpus keys: httpx -> .corpus/httpx + cartograph-out/httpx.kuzu
+#              flask -> .corpus/flask/src/flask + cartograph-out/flask.kuzu
+
+- id: 1
+  corpus: httpx
+  mode: STRUCT
+  task: >
+    Which method calls _send_handling_redirects? Name the fully qualified
+    method (Class.method).
+  gold: ["_send_handling_auth"]
+
+- id: 2
+  corpus: httpx
+  mode: SEMANTIC
+  task: >
+    When httpx follows a redirect, where does it decide which HTTP method the
+    redirected request should use (e.g. 303 turning POST into GET)? Name the method.
+  gold: ["_redirect_method"]
+
+- id: 3
+  corpus: httpx
+  mode: STRUCT
+  task: >
+    Response bodies can arrive compressed. Name the BASE class of the decoder
+    hierarchy that decompresses them.
+  gold: ["ContentDecoder"]
+
+- id: 4
+  corpus: httpx
+  mode: EXACT
+  task: >
+    Find the class GZipDecoder. In which module file does it live? Answer with
+    the module/file name.
+  gold: ["_decoders"]
+
+- id: 5
+  corpus: httpx
+  mode: MULTIHOP
+  task: >
+    Client.send handles auth and redirects, but which method finally issues one
+    single HTTP request on the transport? Name the method.
+  # handle_request accepted too: "the transport's own entry point" is a defensible
+  # reading (grading generosity goes to the baseline condition).
+  gold: ["_send_single_request", "handle_request"]
+
+- id: 6
+  corpus: httpx
+  mode: SEMANTIC
+  task: >
+    Which class implements the mutable mapping that stores and exposes HTTP
+    cookies across requests and responses? Name the class.
+  gold: ["Cookies"]
+
+- id: 7
+  corpus: httpx
+  mode: STRUCT
+  task: >
+    Name the Auth subclass that reads credentials from a .netrc file.
+  gold: ["NetRCAuth"]
+
+- id: 8
+  corpus: httpx
+  mode: MULTIHOP
+  task: >
+    Which method constructs the new Request object that will be sent when a
+    redirect is followed? Name the method.
+  gold: ["_build_redirect_request"]
+
+- id: 9
+  corpus: flask
+  mode: STRUCT
+  task: >
+    Which method on the Flask application class converts a view function's
+    return value into an actual Response object? Name it as Class.method.
+  gold: ["Flask.make_response"]
+
+- id: 10
+  corpus: flask
+  mode: SEMANTIC
+  task: >
+    When a view raises an exception, which Flask method decides whether it is an
+    HTTPException to be rendered or a genuine error to re-raise? Name the method.
+  gold: ["handle_user_exception"]
+
+- id: 11
+  corpus: flask
+  mode: EXACT
+  task: >
+    Where is the class BlueprintSetupState defined? Name the module/file.
+  gold: ["sansio"]
+
+- id: 12
+  corpus: flask
+  mode: MULTIHOP
+  task: >
+    flask.helpers.url_for delegates URL building to a method on the current app
+    object. Name that method as Class.method.
+  gold: ["Flask.url_for"]

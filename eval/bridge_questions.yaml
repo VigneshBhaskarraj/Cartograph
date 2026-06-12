@@ -29,3 +29,15 @@
   question: "Trace the User model down to its table's columns."
   mode: MULTIHOP
   anchors: ["users", "users.email"]
+- id: 8
+  question: "Which schema column determines whether an order counts as paid?"
+  mode: CROSS
+  anchors: ["Order.is_paid", "orders.total"]
+- id: 9
+  question: "Which database column supplies the value shown when displaying a user's name?"
+  mode: CROSS
+  anchors: ["User.display_name", "users.email"]
+- id: 10
+  question: "Trace the helper that fetches a customer's orders down to the schema column its filter relies on."
+  mode: MULTIHOP+CROSS
+  anchors: ["orders_for_user", "orders.user_id"]
