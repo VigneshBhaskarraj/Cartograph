@@ -190,3 +190,24 @@ def test_same_module_inherits_stays_extracted(tmp_path):
     assert len(inherits) == 1  # decoy shadowed, not edged
     assert inherits[0].confidence == "EXTRACTED"
     assert by_id[inherits[0].dst].module == by_id[inherits[0].src].module
+
+
+def test_module_docstring_survives_shebang_and_license(tmp_path):
+    """G5-C6: leading comments are named children at module level, so the old
+    _docstring bailed on them and very common file shapes lost their docstring."""
+    p = tmp_path / "tool.py"
+    p.write_text("#!/usr/bin/env python\n# Copyright (c) example\n\"\"\"The doc.\"\"\"\n\ndef f():\n    pass\n")
+    graph = extract_paths([p], root=p)
+    mod = next(n for n in graph.nodes if n.kind == "module")
+    assert "The doc." in mod.docstring
+
+
+def test_broken_file_warns_not_silent(tmp_path):
+    """G5-C6: tree-sitter never raises — a syntactically broken file used to
+    yield a silently partial graph."""
+    import pytest as _pytest
+
+    p = tmp_path / "broken.py"
+    p.write_text("def f(:\n    ???\n")
+    with _pytest.warns(UserWarning, match="syntax errors"):
+        extract_paths([p], root=p)

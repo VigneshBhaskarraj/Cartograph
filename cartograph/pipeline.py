@@ -154,7 +154,7 @@ def _dedup_schema(schema: Graph) -> Graph:
 def _extract_embedded_sql(graph: Graph) -> None:
     """Pull SQL out of Python string literals: CREATE TABLE -> table/column nodes,
     DML -> QUERIES edges (function -> table). The bridge for raw-SQL (non-ORM) apps."""
-    from .model import EXTRACTED, Edge
+    from .model import EXTRACTED, INFERRED, Edge
 
     units = [u for n in graph.nodes for u in n.extra.get("sql", [])]
     if not units:
@@ -201,11 +201,15 @@ def _extract_embedded_sql(graph: Graph) -> None:
     def _table(ref):
         return by_qual.get(ref) or by_name.get(ref.rsplit(".", 1)[-1])
 
-    def _edge(etype, src, dst):
+    def _edge(etype, src, dst, confidence=EXTRACTED):
         if src in valid and dst in valid and (etype, src, dst) not in seen:
             seen.add((etype, src, dst))
-            graph.edges.append(Edge(etype, src, dst, EXTRACTED))
+            graph.edges.append(Edge(etype, src, dst, confidence))
 
+    # FK structure inside a parse-verified CREATE TABLE is deterministic DDL —
+    # EXTRACTED. QUERIES/JOINS are heuristic end to end (regex string sniffing,
+    # bare-name table matching, and the string may never even be executed), so
+    # they are INFERRED per the confidence invariant (G5-C6).
     for src_id, ref in pending_fks:
         tgt = _table(ref)
         if tgt:
@@ -213,15 +217,15 @@ def _extract_embedded_sql(graph: Graph) -> None:
     for owner_id, ref in pending_queries:
         tgt = _table(ref)
         if tgt:
-            _edge("QUERIES", owner_id, tgt.id)
+            _edge("QUERIES", owner_id, tgt.id, INFERRED)
     for a, b in pending_joins:  # table <-> table relationship from a query JOIN
         ta, tb = _table(a), _table(b)
         if ta and tb and ta.id != tb.id:
-            _edge("JOINS", ta.id, tb.id)
+            _edge("JOINS", ta.id, tb.id, INFERRED)
     for owner_id, tbl, col in pending_cols:  # function -> specific column
         cn = col_by_qual.get(f"{tbl}.{col}")
         if cn:
-            _edge("QUERIES", owner_id, cn.id)
+            _edge("QUERIES", owner_id, cn.id, INFERRED)
 
 
 def _bridge_models_to_tables(graph: Graph) -> None:

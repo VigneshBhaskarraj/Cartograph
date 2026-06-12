@@ -181,7 +181,11 @@ def extract_go_paths(paths: list[Path], root: Path) -> Graph:
         rel = path.relative_to(pkg_parent).as_posix() if path.is_relative_to(pkg_parent) else path.name
         src = path.read_bytes()
         fx = _GoFile(src, rel)
-        fx.run(parser.parse(src).root_node)
+        tree = parser.parse(src)
+        if tree.root_node.has_error:
+            import warnings  # tree-sitter never raises; partial graphs must not be silent (G5-C6)
+            warnings.warn(f"syntax errors in {rel}; its graph may be partial", stacklevel=2)
+        fx.run(tree.root_node)
         files.append(fx)
 
     nodes: list[Node] = [n for f in files for n in f.nodes]

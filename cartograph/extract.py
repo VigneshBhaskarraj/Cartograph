@@ -51,6 +51,8 @@ def _docstring(body: TSNode | None, src: bytes) -> str:
     if body is None:
         return ""
     for child in body.named_children:
+        if child.type == "comment":
+            continue  # shebang/coding/license comments precede many module docstrings (G5-C6)
         if child.type == "expression_statement" and child.named_children:
             first = child.named_children[0]
             if first.type == "string":
@@ -327,6 +329,11 @@ class _FileExtractor:
 def extract_source(source: str, rel_path: str, module: str | None = None) -> _FileExtractor:
     src = source.encode("utf-8")
     tree = _PARSER.parse(src)
+    if tree.root_node.has_error:
+        # tree-sitter never raises — a broken file silently yields a partial
+        # graph unless someone says so (G5-C6, the "warn loudly" rule).
+        import warnings
+        warnings.warn(f"syntax errors in {rel_path}; its graph may be partial", stacklevel=2)
     mod = module or module_qualified_name(rel_path)
     fx = _FileExtractor(src, rel_path, mod)
     fx.run(tree.root_node)
