@@ -43,7 +43,10 @@ This is deliberately positioned as a fix for the structural weaknesses of cloud 
 
 ## 6. Non-goals
 - No 28-language breadth. Python (+ SQL schema) first; architecture should make adding a language easy later, but we don't build that now.
-- No browser visualization for the MVP.
+- ~~No browser visualization for the MVP.~~ *Amended post-MVP (2026-06-12):*
+  `cartograph viz` ships as a **viewer/demo artifact only** — a static, offline,
+  self-contained HTML export. The retrieval engine never depends on it, and it makes
+  no network calls (the zero-egress promise extends to the page itself).
 - No cloud LLM in the default path.
 - Not competing on distribution or star count.
 
@@ -81,3 +84,6 @@ This is deliberately positioned as a fix for the structural weaknesses of cloud 
   unless `CARTOGRAPH_ALLOW_REMOTE_OLLAMA=1` is set explicitly.
 - The project license is **Apache-2.0** (patent grant for enterprise adoption);
   dependencies remain MIT-compatible per §5 (Kuzu itself is MIT).
+- **Visualization is dependency-free by design**: the force layout runs in numpy at
+  export time (vectorized 3D Fruchterman–Reingold); the browser side is hand-rolled
+  vanilla JS (projection, picking, BFS focus/paths) — no vendored libraries, no CDN.

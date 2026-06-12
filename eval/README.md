@@ -49,7 +49,33 @@ done
   leg should rise and pull hybrid further up, with no code change. That, plus the
   reranker, is M2.
 
-## Results — real embeddings (`nomic-embed-text` via Ollama, on Apple M4)
+## Validated results — 89 questions / 5 corpora, with baselines (2026-06-11, Apple M4)
+
+`uv run python eval/scorecard.py --embedder ollama --reindex --baselines` after the
+Gate-3 expansion. **click is held out**: its 18 questions were written after fusion
+calibration and never used for tuning. Means across the five corpora:
+
+| system | recall@5 | recall@10 | mrr |
+| --- | --- | --- | --- |
+| naive-rag+nomic (40-line chunks, no structure) | 0.525 | 0.720 | 0.230 |
+| grep (term search over raw source) | 0.535 | 0.670 | 0.362 |
+| graph (PPR alone) | 0.722 | 0.860 | 0.449 |
+| lexical (BM25 alone) | 0.769 | 0.877 | 0.554 |
+| vector+nomic (alone) | 0.850 | 0.927 | 0.714 |
+| **hybrid (calibrated weighted RRF)** | **0.882** | **0.952** | **0.744** |
+
+- **Held-out validation:** on click, baked hybrid vs vector = r@5 0.778/0.778 (tie),
+  r@10 **0.944**/0.889, mrr **0.706**/0.653 → the calibration **generalizes**
+  (`fusion_sweep.py` prints this check; its 71-question tuning sweep also recommended
+  an alternative config, `weights=(1.5, 1.0, 0.5)`, scoring 0.920/0.946/0.740 vs the
+  baked config's 0.908/0.954/0.754 on the tuning corpora — near-tied, and not adopted:
+  choosing between near-ties using the held-out corpus would burn its held-out status).
+- **Per-corpus hybrid r@10:** httpx 0.862 · flask 0.955 · bridge 1.0 · ai-digest 1.0
+  · click 0.944 — wins or ties vector everywhere.
+- The 38 added questions are deliberately harder than the original 51 (httpx hybrid
+  r@10 0.905 → 0.862 on the bigger set): headroom, not saturation.
+
+## Results — original 21-question httpx set (`nomic-embed-text` via Ollama, Apple M4)
 
 Run with `bash eval/run_local.sh` (see [`docs/local-setup.md`](../docs/local-setup.md)).
 

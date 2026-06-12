@@ -58,6 +58,15 @@ Exposes `query` / `semantic_search` / `get_node` / `neighbors` / `calls` / `call
 `shortest_path` so an agent queries structure instead of grepping. Wiring + tool
 reference: [`docs/mcp.md`](./docs/mcp.md).
 
+### See it
+Export an interactive **3D map** of any indexed graph to a single offline HTML file —
+rotate, search, click a symbol for its callers/callees neighborhood, trace shortest
+paths, filter edge types and EXTRACTED/INFERRED confidence. Zero network calls,
+no libraries, shareable as one file (`?embed=1` for a clean embed view):
+```bash
+uv run cartograph viz --db cartograph-out/graph.kuzu --out graph.html
+```
+
 ### Measure it — including against the alternatives
 Retrieval quality is measured, never asserted (see `CLAUDE.md`). The one-command
 dashboard indexes five corpora (89 questions — one corpus held out from all tuning)
@@ -83,14 +92,21 @@ with any local Ollama chat model via `eval/agent_bench/run_bench.py`.
 - [x] M5 — code↔schema bridge: ORM `__tablename__` → table (`MAPS_TO`) **and** raw-SQL embedded in Python → tables + `QUERIES` edges (function → table/**column**) + `JOINS` (table↔table from query JOINs); schema-bridging eval on a synthetic corpus (recall@10 **1.0**) **and the real `ai-digest` repo** (~0.86); generalized eval runner (`--questions`/`--db`)
 - [x] M6 — second language: **TypeScript/TSX** extractor via tree-sitter (`--extra ts`) — classes, interfaces, functions, arrow-const functions, methods, `extends` (INHERITS), imports, heuristic calls — into the same graph (polyglot: Python + TS in one store)
 
-**Latest eval** (real `nomic-embed-text` embeddings, 4 corpora / 51 questions). After
-calibrating fusion on the sweep (`eval/fusion_sweep.py`), **weighted `hybrid` now wins
-or ties vector on recall@10 across every corpus** and lifts the aggregate to
-**recall@5 0.909 / recall@10 0.961 / MRR 0.735** (vs vector 0.885 / 0.937 / 0.707).
-Honest caveat: the MRR edge is partly carried by one corpus, so the durable,
-generalizing win is *recall* — see [`SPEC.md`](./SPEC.md) §8. The opt-in **LLM reranker**
-(`gemma3:12b`) further leads top-rank quality. Full tables, the offline baseline, and
-the reranker trade-off: [`eval/README.md`](./eval/README.md).
+**Latest eval — validated 2026-06-11** (real `nomic-embed-text` embeddings, **89
+questions / 5 corpora**, one corpus fully held out from tuning). Mean across corpora:
+
+| system | recall@5 | recall@10 | mrr |
+|---|---|---|---|
+| naive-rag (structure-blind chunks) | 0.52 | 0.72 | 0.23 |
+| grep over raw source | 0.53 | 0.67 | 0.36 |
+| vector (single signal) | 0.85 | 0.93 | 0.71 |
+| **Cartograph hybrid** | **0.88** | **0.95** | **0.74** |
+
+The calibrated fusion **generalizes**: on the held-out corpus (click, untouched by any
+tuning) hybrid ties vector on recall@5 and beats it on recall@10 (0.944 vs 0.889) and
+MRR (0.706 vs 0.653). Agent-task evidence (equal success, **42% fewer tool calls** vs
+grep): [`eval/agent_bench/RESULTS.md`](./eval/agent_bench/RESULTS.md). Full tables and
+methodology: [`eval/README.md`](./eval/README.md).
 
 ## License
 [Apache License 2.0](./LICENSE) — permissive, with an explicit patent grant suited to

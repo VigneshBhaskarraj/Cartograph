@@ -237,6 +237,39 @@ class Store:
             vecs.append(list(r[1]) if r[1] is not None else [])
         return ids, vecs
 
+    def all_nodes_full(self) -> list[dict]:
+        """Every node with the fields the visualizer needs (no embeddings)."""
+        res = self.conn.execute(
+            "MATCH (c:CodeNode) RETURN c.id, c.kind, c.name, c.qualified_name, "
+            "c.file_path, c.start_line, c.signature, c.docstring"
+        )
+        out = []
+        while res.has_next():
+            r = res.get_next()
+            out.append({"id": r[0], "kind": r[1], "name": r[2], "qualified_name": r[3],
+                        "file_path": r[4], "start_line": r[5], "signature": r[6],
+                        "docstring": r[7]})
+        return out
+
+    def all_edges_typed(self) -> list[tuple[str, str, str, str]]:
+        """Every (src, dst, type, confidence). CONTAINS/DOCUMENTS carry no
+        confidence column — they are deterministic structure, so EXTRACTED."""
+        out: list[tuple[str, str, str, str]] = []
+        for et in EDGE_TYPES:
+            if et in ("CONTAINS", "DOCUMENTS"):
+                res = self.conn.execute(
+                    f"MATCH (a:CodeNode)-[:{et}]->(b:CodeNode) RETURN a.id, b.id")
+                while res.has_next():
+                    r = res.get_next()
+                    out.append((r[0], r[1], et, "EXTRACTED"))
+            else:
+                res = self.conn.execute(
+                    f"MATCH (a:CodeNode)-[r:{et}]->(b:CodeNode) RETURN a.id, b.id, r.confidence")
+                while res.has_next():
+                    r = res.get_next()
+                    out.append((r[0], r[1], et, r[2] or "EXTRACTED"))
+        return out
+
     def all_edges(self) -> list[tuple[str, str]]:
         """Every (src, dst) across all rel tables — for in-memory graph algorithms."""
         out: list[tuple[str, str]] = []

@@ -219,6 +219,31 @@ def path(
 
 
 @app.command()
+def viz(
+    db: str = typer.Option(DEFAULT_DB, help="Kuzu DB path."),
+    out: str = typer.Option("cartograph-out/graph.html", help="Output HTML file."),
+    title: str = typer.Option(None, help="Page title (default: DB name)."),
+    iterations: int = typer.Option(200, help="Force-layout iterations (more = nicer, slower)."),
+) -> None:
+    """Export an interactive 3D map of the graph to a single offline HTML file.
+
+    A viewer, never a retrieval path: rotate/zoom/search, click a symbol for its
+    neighborhood, trace shortest paths, filter edge types and EXTRACTED/INFERRED.
+    The file is fully self-contained — no CDN, no network calls, shareable as-is.
+    """
+    from .viz import write_viz
+
+    try:
+        summary = write_viz(db, out, title=title, iterations=iterations)
+    except (FileNotFoundError, RuntimeError, ValueError) as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
+    typer.echo(f"Wrote {summary['out']} ({summary['nodes']} nodes, "
+               f"{summary['links']} links, {summary['bytes'] // 1024} KB)")
+    typer.echo("Open it in a browser — everything runs locally.")
+
+
+@app.command()
 def demo(
     path: Path = typer.Argument(..., help="Python file to run the M0 vertical slice on."),
 ) -> None:
