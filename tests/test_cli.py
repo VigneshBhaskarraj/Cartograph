@@ -134,3 +134,20 @@ def test_structural_cli_commands(tmp_path):
     assert r.exit_code == 1
     r = runner.invoke(app, ["calls", "x", "--db", str(tmp_path / "missing.kuzu")])
     assert r.exit_code == 1 and "no graph at" in r.output
+
+
+def test_missing_language_extra_warns_loudly(tmp_path, monkeypatch):
+    """A Java repo indexed without tree-sitter-java must WARN, not silently produce
+    a half-empty graph (a real user hit this: petclinic scored 0 on code questions)."""
+    import sys
+
+    import pytest as _pytest
+
+    from cartograph.pipeline import build_graph
+
+    (tmp_path / "App.java").write_text("package x;\npublic class App {}\n")
+    (tmp_path / "ok.py").write_text("def f():\n    return 1\n")
+    monkeypatch.setitem(sys.modules, "cartograph.java_extract", None)  # import -> ImportError
+    with _pytest.warns(UserWarning, match="Java files.*NOT indexed.*--extra java"):
+        g = build_graph(tmp_path)
+    assert any(n.name == "f" for n in g.nodes)  # the python half still indexed

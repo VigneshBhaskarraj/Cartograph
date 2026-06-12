@@ -51,6 +51,17 @@ def _file_digests(path: Path) -> dict[str, str]:
     return out
 
 
+def _warn_skipped(files: list, lang: str, extra: str) -> None:
+    """Found source files but their extractor isn't installed: silence here means a
+    stranger indexes a Java repo and gets an almost-empty graph with no clue why."""
+    import warnings
+
+    warnings.warn(
+        f"found {len(files)} {lang} files but their extractor is not installed — "
+        f"they were NOT indexed. Install with: uv sync --extra {extra}",
+        stacklevel=2)
+
+
 def build_graph(path: Path, resolver: str = "heuristic") -> Graph:
     py_files = _files(path, ".py")
     graph = extract_paths(py_files, root=path, resolver=resolver) if py_files else Graph()
@@ -61,8 +72,8 @@ def build_graph(path: Path, resolver: str = "heuristic") -> Graph:
             schema = _dedup_schema(extract_sql_paths(sql_files, root=path))
             graph.nodes.extend(schema.nodes)
             graph.edges.extend(schema.edges)
-        except ModuleNotFoundError:
-            pass  # sqlglot not installed; skip SQL (install with `--extra sql`)
+        except ImportError:
+            _warn_skipped(sql_files, "SQL", "sql")
     java_files = _files(path, ".java")
     if java_files:
         try:
@@ -70,8 +81,8 @@ def build_graph(path: Path, resolver: str = "heuristic") -> Graph:
             jg = extract_java_paths(java_files, root=path)
             graph.nodes.extend(jg.nodes)
             graph.edges.extend(jg.edges)
-        except ModuleNotFoundError:
-            pass  # tree-sitter-java not installed; skip (install with `--extra java`)
+        except ImportError:
+            _warn_skipped(java_files, "Java", "java")
     go_files = _files(path, ".go")
     if go_files:
         try:
@@ -79,8 +90,8 @@ def build_graph(path: Path, resolver: str = "heuristic") -> Graph:
             gg = extract_go_paths(go_files, root=path)
             graph.nodes.extend(gg.nodes)
             graph.edges.extend(gg.edges)
-        except ModuleNotFoundError:
-            pass  # tree-sitter-go not installed; skip (install with `--extra go`)
+        except ImportError:
+            _warn_skipped(go_files, "Go", "go")
     ts_files = [f for suf in TS_JS_SUFFIXES for f in _files(path, suf)]
     if ts_files:
         try:
@@ -88,8 +99,8 @@ def build_graph(path: Path, resolver: str = "heuristic") -> Graph:
             tsg = extract_ts_paths(ts_files, root=path)
             graph.nodes.extend(tsg.nodes)
             graph.edges.extend(tsg.edges)
-        except ModuleNotFoundError:
-            pass  # tree-sitter-typescript not installed; skip (install with `--extra ts`)
+        except ImportError:
+            _warn_skipped(ts_files, "TypeScript/JavaScript", "ts")
     # Every language extractor mints external stubs as ext::<target>; a polyglot
     # repo (import redis + require('redis')) would hit a duplicate-primary-key
     # crash at load. Same id = same external package — keep the first.
