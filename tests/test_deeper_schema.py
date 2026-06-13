@@ -27,4 +27,6 @@ def test_join_and_column_level_edges():
     tbl_q = {(by_id[e.src].name, by_id[e.dst].name)
              for e in g.edges if e.type == "QUERIES" and by_id[e.dst].kind == "table"}
     assert ("user_order_totals", "users") in tbl_q
-    assert all(e.confidence == "EXTRACTED" for e in g.edges if e.type in ("JOINS", "QUERIES"))
+    # G5-C6: embedded-SQL QUERIES/JOINS are heuristic (string sniffing,
+    # bare-name matching) — INFERRED per the confidence invariant.
+    assert all(e.confidence == "INFERRED" for e in g.edges if e.type in ("JOINS", "QUERIES"))

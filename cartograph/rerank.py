@@ -74,6 +74,17 @@ class OllamaReranker:
         _check_loopback(self.host)
         self.max_chars = max_chars
         self._fallback = LexicalReranker()
+        self._warned_fallback = False
+
+    def _warn_fallback(self, exc: Exception) -> None:
+        """A configured LLM reranker silently degrading to lexical on every query
+        would invalidate anything measured 'with reranking on' — say so, once."""
+        if not self._warned_fallback:
+            import warnings
+            warnings.warn(
+                f"ollama reranker unavailable ({exc}); falling back to lexical "
+                "reordering for this session", stacklevel=3)
+            self._warned_fallback = True
 
     def _prompt(self, query: str, candidates: list[Candidate]) -> str:
         lines = [
@@ -107,7 +118,8 @@ class OllamaReranker:
         try:
             with urllib.request.urlopen(req, timeout=120) as resp:
                 reply = json.loads(resp.read()).get("response", "")
-        except Exception:
+        except (OSError, ValueError) as exc:  # unreachable/refused host, bad model, junk JSON
+            self._warn_fallback(exc)
             return self._fallback.rerank(query, candidates)
         order = _parse_order(reply, len(candidates))
         if not order:

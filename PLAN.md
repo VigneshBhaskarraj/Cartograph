@@ -305,6 +305,182 @@ Closing the three publish-blockers: no external baseline, no agent benchmark,
 - Scale agent bench beyond n=12 and run with a weaker local model, where accuracy
   (not just efficiency) gaps are expected to appear.
 
+## Gate-5 — Hardening (added 2026-06-12) ✅ DONE 2026-06-12
+Trigger: the local MCP server died with "Connection closed" — root cause was a
+pre-G4-1 graph missing the empty JOINS/QUERIES rel tables (fixed operationally by
+running the two `schema_ddl()` statements against `httpx-ollama.kuzu`). A three-agent
+review of the full codebase followed; this gate is the prioritized result. Three
+tracks: **A** interface robustness, **B** index/store integrity, **C** extractor
+correctness. Track C tasks marked **[eval-first]** change graph edges and must ship
+with before/after scorecard numbers (CLAUDE.md directive 3), not just passing tests.
+
+> **Closed 2026-06-12.** All 14 tasks landed (A1-A4, B1-B4, C1-C6) across five
+> commits; 155 tests green (was 127). Independent fresh-context review (directive
+> 6): **GO** — all tasks verified implemented; its three follow-up findings
+> (heal-policy documentation + versionless-heal test, dirty-rebuild `use_cache`
+> plumbing, multi-hop filter validation) fixed and tested in the closing commit.
+> C5 verified byte-identical: node/edge dumps over all 6 corpora, zero diff.
+> Eval: zero regression anywhere; petclinic graph mrr 0.386 → 0.400 (C3).
+
+### Track A — MCP/CLI robustness
+
+### G5-A1 — Startup failures must reach the MCP client
+- **Files:** `cartograph/mcp_server.py`, `cartograph/service.py`, `tests/test_mcp.py`
+- **Does:** service constructed before the handshake (`mcp_server.py:93-97`) means any
+  startup error = "Connection closed". Lazy-init the service (or degraded server whose
+  tools return the error text). When the only incompatibility is missing **empty** rel
+  tables and `schema_version` matches, auto-create them from `schema_ddl()` and proceed.
+- **Verify:** `uv run pytest tests/test_mcp.py -q` (new: serve against a JOINS/QUERIES-less
+  DB → tools respond, tables created)
+
+### G5-A2 — Bound and validate every tool input/output
+- **Files:** `cartograph/service.py`, `cartograph/store.py`, `tests/test_service.py`
+- **Does:** clamp `hops` (raw Kuzu binder error leaks at >30; whole-graph payloads at
+  2-30 — `service.py:142`); cap `resolve()` results (currently unbounded —
+  `store.py:283`) with a `truncated` flag; reject invalid `direction`/`relation`
+  with the actionable-ValueError style `query` already uses for `mode` (silent `[]`
+  today — `store.py:313-333`).
+- **Verify:** `uv run pytest tests/test_service.py -q`
+
+### G5-A3 — Unknown-ref structured errors + protocol round-trip tests
+- **Files:** `cartograph/mcp_server.py`, `cartograph/service.py`, `tests/test_mcp.py`
+- **Does:** MCP `get_node`/`neighbors`/`calls` return `null`/`[]` for unknown refs —
+  indistinguishable from genuinely-empty (the CLI guards this exact case at
+  `cli.py:172-178`; the MCP surface doesn't). Return a structured error with top-5
+  `resolve` candidates. Add `call_tool` round-trip + error-path tests (test_mcp.py
+  currently asserts tool *registration* only).
+- **Verify:** `uv run pytest tests/test_mcp.py -q`
+
+### G5-A4 — Route `cartograph query` through the service
+- **Files:** `cartograph/cli.py`, `tests/test_cli.py`
+- **Does:** `cli.query` bypasses `CartographService` — duplicate mode validation, no
+  `k` clamp, `rerank` unreachable from the CLI (`cli.py:82-114`). Route through the
+  service; delete `QUERY_MODES`. Also: friendly error for `demo` (`cli.py:285`),
+  `ModuleNotFoundError` check `e.name == "mcp"` (`cli.py:314`), fix stale help text
+  ("Python file or directory"; "No HTML viz").
+- **Verify:** `uv run pytest tests/test_cli.py -q`
+
+### Track B — Index/store integrity
+
+### G5-B1 — Atomic incremental updates
+- **Files:** `cartograph/pipeline.py`, `cartograph/store.py`, `tests/test_incremental.py`
+- **Does:** `update_index` mutates via auto-committing statements
+  (`delete_all_edges` → `delete_nodes` → `load_nodes` → `load_edges`, `pipeline.py:396-416`);
+  a crash mid-sequence leaves a nodes-but-no-edges graph that passes every check.
+  Wrap in a Kuzu transaction, or write a `dirty=1` Meta flag before mutating and clear
+  after, with `open_graph` rejecting dirty graphs. (Choice = open question Q1.)
+- **Verify:** `uv run pytest tests/test_incremental.py -q` (new: simulated crash
+  mid-update → next `open_graph` refuses or graph is intact)
+
+### G5-B2 — Harden the schema gate
+- **Files:** `cartograph/service.py`, `cartograph/store.py`, `tests/test_service.py`
+- **Does:** gate checks table names only (`service.py:30-38`): missing
+  `schema_version` is treated as *compatible*, `Meta` isn't in `REQUIRED_TABLES`,
+  columns never validated. Add `Meta` to required tables; missing version =
+  incompatible; stamp version *first* during indexing; validate `CodeNode` columns
+  via `CALL table_info`. Add the (currently untested) rejection-path test.
+- **Verify:** `uv run pytest tests/test_service.py -q`
+
+### G5-B3 — Close the parse/digest TOCTOU + stale SQL positions
+- **Files:** `cartograph/pipeline.py`, `cartograph/sql_extract.py`, `tests/test_incremental.py`
+- **Does:** (a) `_file_digests` re-reads files *after* `build_graph`
+  (`pipeline.py:314,412`) — a mid-index edit records the new sha against the old
+  parse, permanently serving stale content; hash bytes once, feed both. (b) SQL node
+  ids/shas omit position (`sql_extract.py:31-62`), so a moved `CREATE TABLE` keeps
+  its old `start_line` on delta update; include position in the sha or `SET` it on
+  kept rows.
+- **Verify:** `uv run pytest tests/test_incremental.py -q`
+
+### G5-B4 — Reranker honesty + small store fixes
+- **Files:** `cartograph/rerank.py`, `cartograph/retrieve.py`, `cartograph/cache.py`
+- **Does:** `except Exception` silently degrades a configured LLM reranker to lexical
+  on every query (`rerank.py:107-111`) — narrow + `warnings.warn` once;
+  `mode=rerank` silently caps at `pool=20` regardless of `k` (`retrieve.py:196`) —
+  `pool = max(pool, k)`; cache save non-atomic (`cache.py:59`) — temp file +
+  `os.replace`, warn on corruption reset.
+- **Verify:** `uv run pytest tests/test_retrieve.py tests/test_cache.py -q`
+
+### Track C — Extractor correctness
+
+> **C1–C4 eval verdict (2026-06-12, hash, 6 corpora):** zero quality regression on
+> every corpus/retriever; petclinic graph mrr 0.386 → 0.400 (C3's same-package
+> tier removed cross-package false CALLS). C1/C4 deltas are zero by construction —
+> **no TS corpus exists in the eval set** (gap recorded below); covered by unit
+> tests. C2 moves tags, not edges-used-in-scoring, so retrieval is unchanged.
+
+### G5-C1 — TS heritage: stop harvesting generic type args **[eval-first]**
+- **Files:** `cartograph/ts_extract.py`, `tests/test_ts.py`
+- **Does:** `class A extends Component<Props, State>` emits INHERITS to `Component`,
+  `Props`, *and* `State` (`ts_extract.py:203-207`) — walk only
+  extends/implements-clause expressions, skip `type_arguments` subtrees.
+- **Verify:** `uv run pytest tests/test_ts.py -q` + scorecard delta on TS-bearing corpora
+
+### G5-C2 — INHERITS confidence: unique-name matches are not EXTRACTED **[eval-first]**
+- **Files:** `cartograph/extract.py`, `cartograph/ts_extract.py`,
+  `cartograph/go_extract.py`, `cartograph/java_extract.py`, tests
+- **Does:** all four extractors tag unique-name base-class matches `EXTRACTED`
+  (`extract.py:449-461` et al.) — heuristic, violates the edge-confidence invariant
+  (`class User(models.Model)` + any local `Model` → wrong edge, top confidence).
+  Tag `EXTRACTED` only when the base resolves through the module/import graph;
+  otherwise `INFERRED`. (Policy detail = open question Q2.)
+- **Verify:** language test suites + `eval/scorecard.py` before/after (hash for
+  mechanism, ollama for the recorded number)
+
+### G5-C3 — Go/Java: `module` means package, not file **[eval-first]**
+- **Files:** `cartograph/go_extract.py`, `cartograph/java_extract.py`, tests
+- **Does:** `module = "<package>.<file-stem>"` makes the same-module resolution tier
+  mean "same file" (`go_extract.py:219`, `java_extract.py:238`) — cross-file
+  same-package calls fall through to corpus-wide name matching (verified false
+  positives). Add a same-package tier before the all-candidates fallback.
+- **Verify:** new cross-package collision tests + scorecard delta (petclinic, bridge)
+
+### G5-C4 — TS recall holes: arrows everywhere **[eval-first]**
+- **Files:** `cartograph/ts_extract.py`, `tests/test_ts.py`
+- **Does:** calls inside arrow callbacks dropped (`ts_extract.py:237` skips
+  `arrow_function` — `items.forEach(i => doWork())` → no CALLS edge); class-field
+  arrow methods (`handleClick = () => {}`) not extracted (`ts_extract.py:209-219`);
+  nested decls in CommonJS-assigned functions leak to module scope
+  (`ts_extract.py:111-113`). Fix all three with the lexical-scoping approach
+  `extract.py:_walk` already uses.
+- **Verify:** `uv run pytest tests/test_ts.py -q` + scorecard delta
+
+### G5-C5 — Unify the 4× duplicated resolution pass
+- **Files:** new `cartograph/resolve.py` (name TBD), all four extractors, tests
+- **Does:** ~65 near-identical lines (name index, receiver→module→all-candidates
+  tiers, fan-out cap, INHERITS rule, ext-stub minting) duplicated across
+  `extract.py:383-490`, `ts_extract.py:260-328`, `go_extract.py:187-251`,
+  `java_extract.py:213-275` — the breeding ground for G5-C2/C3-class drift. Extract
+  one shared pass. **Deliberately last in track C**: the C1-C4 tests become the
+  refactor's safety net.
+- **Verify:** full language suites green, graph output byte-identical on the eval
+  corpora (diff node/edge dumps before/after)
+
+### G5-C6 — Warn on parse errors; small extractor fixes
+- **Files:** all extractors, `cartograph/pipeline.py`, tests
+- **Does:** no extractor checks `tree.root_node.has_error` — broken files silently
+  yield partial graphs; warn per-file (matches the 0f46fe6 "warn loudly" direction).
+  Also: Python module docstring lost behind shebang/license comments
+  (`extract.py:50-59`); embedded-SQL QUERIES/JOINS edges from bare-name fallback
+  tagged EXTRACTED (`pipeline.py:204-224`) → INFERRED; SQL nodes all get
+  `start_line=0` (`sql_extract.py:96`).
+- **Verify:** language suites + `tests/test_sql.py -q`
+
+### Deferred (recorded, not scheduled)
+Scale work (sparse-matrix PPR, inverted-index BM25, `UNWIND` deletes, batched/deduped
+Ollama embedding — fine at current corpus sizes); TS namespaces/re-exports/getters;
+Go var-func-literals/type-aliases/interface-embedding; JSDoc/godoc/javadoc capture
+(systematic embed-text bias against non-Python corpora — schedule when a non-Python
+corpus joins the eval set); viz `layout_3d` O(n²) memory guard; viz title escaping.
+
+### Open questions — resolved 2026-06-12
+- **Q1 (G5-B1):** ✅ dirty-flag Meta. Portable, catches crashes outside any
+  transaction scope, reuses existing Meta machinery.
+- **Q2 (G5-C2):** ✅ same-module only. EXTRACTED when the base resolves within the
+  same module (deterministic lexical resolution); cross-module unique-name matches
+  demote to INFERRED.
+- **Q3 (G5-A2):** ✅ clamp hops to 8 (eval's deepest MULTIHOP + headroom; Kuzu hard
+  ceiling is 30). Out-of-range clamps with a note rather than erroring.
+
 ---
 
 ## Implementation notes — deviations from this plan (M0/M1 as shipped)

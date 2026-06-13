@@ -202,6 +202,7 @@ class Retriever:
         protects recall@k from a reranker that under-values exact symbol matches.
         Falls back to the fused order if no reranker is configured.
         """
+        pool = max(pool, k)  # k > pool must not silently cap the result count at pool
         fused = self.hybrid(query, k=pool)
         if not self.reranker or not fused:
             return fused[:k]

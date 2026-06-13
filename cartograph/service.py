@@ -14,9 +14,43 @@ from pathlib import Path
 from .embed import get_embedder
 from .model import EDGE_TYPES
 from .retrieve import Retriever
-from .store import DEFAULT_DIM, SCHEMA_VERSION, Store
+from .store import DEFAULT_DIM, SCHEMA_VERSION, Store, expected_codenode_columns, schema_ddl
 
-REQUIRED_TABLES = {"CodeNode", *EDGE_TYPES}
+REQUIRED_TABLES = {"CodeNode", "Meta", *EDGE_TYPES}
+
+# Result/traversal bounds. Tool consumers are agents: an unbounded neighborhood or
+# resolve list lands in a model's context window, so every list is capped and says
+# so via a trailing {"truncated": True, "total": N, "note": ...} sentinel rather
+# than silently dropping rows. MAX_HOPS=8 covers the eval set's deepest MULTIHOP
+# question with headroom (Kuzu's hard ceiling is 30 — exceeding it is a raw crash).
+MAX_HOPS = 8
+NEIGHBOR_CAP = 200
+RESOLVE_CAP = 25
+
+# Always-available retrieval modes; `rerank` joins at runtime when a reranker is
+# configured. The CLI imports this for its pre-open check — one source of truth.
+QUERY_MODES = ("hybrid", "vector", "graph", "lexical")
+
+
+def _heal_missing_rel_tables(p: Path, missing: set[str]) -> None:
+    """Create rel tables a newer Cartograph added to the schema. They are created
+    empty — there is nothing to migrate — so an old graph keeps working instead of
+    forcing a full re-index just to pass the table-set gate. Needs brief write
+    access; raises if another process holds the DB."""
+    import warnings
+
+    rel_ddl = {s.split()[3]: s for s in schema_ddl() if s.strip().startswith("CREATE REL TABLE")}
+    store = Store(p, read_only=False)
+    try:
+        for name in sorted(missing):
+            store.conn.execute(rel_ddl[name])
+        store.set_meta("schema_version", SCHEMA_VERSION)
+    finally:
+        store.close()
+    warnings.warn(
+        f"graph at {p} predates the {', '.join(sorted(missing))} table(s); created them "
+        "empty. If this corpus contains SQL, re-run `cartograph index` to populate them.",
+        stacklevel=3)
 
 
 def open_graph(db_path: str | Path, read_only: bool = True) -> Store:
@@ -29,13 +63,52 @@ def open_graph(db_path: str | Path, read_only: bool = True) -> Store:
     store = Store(p, read_only=read_only)
     missing = REQUIRED_TABLES - store.table_names()
     version = store.get_meta("schema_version") if not missing else None
-    if missing or (version is not None and version != SCHEMA_VERSION):
+    if missing and missing <= set(EDGE_TYPES) and store.get_meta("schema_version") in (None, SCHEMA_VERSION):
+        # Only rel tables are absent and the recorded version (if any) matches:
+        # self-heal in place rather than demanding a re-index. A version of None
+        # is deliberately healable here even though the gate below treats
+        # missing-version-with-all-tables as incompatible: graphs missing these
+        # rel tables PREDATE the version meta entirely (the tables and the meta
+        # landed in that order), so None is their expected fingerprint — and the
+        # column gate below still validates the healed graph's structure before
+        # admitting it. A versionless graph with all tables has no such
+        # provenance story, so it stays rejected.
         store.close()
-        why = (f"missing tables: {', '.join(sorted(missing))}" if missing
-               else f"schema_version {version} != {SCHEMA_VERSION}")
+        try:
+            _heal_missing_rel_tables(p, missing)
+        except Exception:  # e.g. another process holds the writer lock —
+            pass  # fall through to the incompatible-graph error below
+        store = Store(p, read_only=read_only)
+        missing = REQUIRED_TABLES - store.table_names()
+        version = store.get_meta("schema_version") if not missing else None
+    # The gate checks three layers, most-specific message first: table set,
+    # recorded version (absence IS incompatibility — a versionless graph predates
+    # the contract or never finished indexing), then CodeNode columns (a column
+    # added without a SCHEMA_VERSION bump used to slip through and crash mid-query).
+    why = None
+    if missing:
+        why = f"missing tables: {', '.join(sorted(missing))}"
+    elif version is None:
+        why = "no recorded schema_version"
+    elif version != SCHEMA_VERSION:
+        why = f"schema_version {version} != {SCHEMA_VERSION}"
+    else:
+        gap = expected_codenode_columns() - store.codenode_columns()
+        if gap:
+            why = f"CodeNode is missing columns: {', '.join(sorted(gap))}"
+    if why:
+        store.close()
         raise RuntimeError(
             f"graph at {p} was built by an incompatible Cartograph ({why}); "
             "re-run `cartograph index`")
+    if store.get_meta("dirty") is not None:
+        # An index/update died mid-write. The table set looks fine but the rows
+        # are partial (e.g. nodes without edges) — refusing here beats silently
+        # serving garbage. `cartograph update` detects the flag and rebuilds.
+        store.close()
+        raise RuntimeError(
+            f"graph at {p} was left mid-write by an interrupted index run; "
+            "re-run `cartograph update` (or `cartograph index`) to repair it")
     return store
 
 
@@ -66,7 +139,7 @@ class CartographService:
             from .rerank import get_reranker
             reranker = get_reranker()
         self.retriever = Retriever(self.store, embedder=embedder, reranker=reranker)
-        self.modes = {"vector", "graph", "lexical", "hybrid"}
+        self.modes = set(QUERY_MODES)
         # Only advertise `rerank` when a reranker is actually wired in.
         if reranker is not None and hasattr(self.retriever, "reranked"):
             self.modes.add("rerank")
@@ -112,14 +185,56 @@ class CartographService:
         ids = self.store.resolve_ids(ref)
         return ids[0] if ids else None
 
-    def get_node(self, ref: str) -> dict | None:
-        """Full detail for a node by id or qualified name (e.g. httpx._client.Client.send)."""
+    def suggest(self, ref: str, limit: int = 5) -> list[str]:
+        """Closest qualified names for a reference that failed to resolve — the
+        'did you mean' candidates attached to unknown-ref errors. Tiered policy:
+        fuzzy match on the last path segment first (catches typos like
+        `Dog.speek`), then case-insensitive substring over qualified names
+        (catches partial recall). Pool is every non-external symbol."""
+        import difflib
+
+        pool = self.store.symbol_names()
+        last = ref.rsplit(".", 1)[-1].lower()
+        names = {n.lower(): qn for n, qn in pool}
+        close = difflib.get_close_matches(last, names, n=limit, cutoff=0.6)
+        if close:
+            return [names[c] for c in close]
+        return [qn for _, qn in pool if last in qn.lower()][:limit]
+
+    def _rid_or_raise(self, ref: str) -> str:
+        """Resolve or raise an actionable error. An unknown symbol must error, not
+        read as 'known symbol, empty result' — agents act on that difference (the
+        CLI already guards this; this gives the MCP surface parity)."""
         rid = self._rid(ref)
+        if rid is None:
+            candidates = self.suggest(ref)
+            hint = f"; did you mean: {', '.join(candidates)}" if candidates else ""
+            raise ValueError(f"no node matches {ref!r}{hint}")
+        return rid
+
+    def get_node(self, ref: str, strict: bool = False) -> dict | None:
+        """Full detail for a node by id or qualified name (e.g. httpx._client.Client.send).
+        `strict=True` raises (with 'did you mean' candidates) instead of returning
+        None for unknown refs — what the MCP surface wants; the CLI's None checks
+        keep the lenient default."""
+        rid = self._rid_or_raise(ref) if strict else self._rid(ref)
         return self._node(rid) if rid else None
 
+    @staticmethod
+    def _cap(out: list[dict], cap: int, hint: str) -> list[dict]:
+        """Truncate a result list to `cap`, appending a sentinel that says so."""
+        if len(out) > cap:
+            total = len(out)
+            out = out[:cap]
+            out.append({"truncated": True, "total": total,
+                        "note": f"showing {cap} of {total}; {hint}"})
+        return out
+
     def resolve(self, ref: str) -> list[dict]:
-        """All nodes a reference matches (use to disambiguate a bare name)."""
-        return [n for n in (self._node(i) for i in self.store.resolve_ids(ref)) if n]
+        """All nodes a reference matches, most-direct first (use to disambiguate a
+        bare name). Capped at RESOLVE_CAP with a trailing truncation sentinel."""
+        out = [n for n in (self._node(i) for i in self.store.resolve_ids(ref)) if n]
+        return self._cap(out, RESOLVE_CAP, f"qualify the name (e.g. Class.{ref})")
 
     def neighbors(self, node_id: str, direction: str = "both", relation: str | None = None,
                   hops: int = 1) -> list[dict]:
@@ -127,19 +242,32 @@ class CartographService:
         (CALLS/INHERITS/IMPORTS/CONTAINS/DOCUMENTS) and `direction` (out=this node is
         the source, in=this node is the target). `direction` and `relation` filter the
         edges. hops>1 expands undirected/unlabeled for broad context. Accepts an id or
-        qualified name."""
-        rid = self._rid(node_id)
-        if rid is None:
-            return []
-        if hops <= 1:
+        qualified name. hops is clamped to 1..MAX_HOPS and results to NEIGHBOR_CAP —
+        out-of-range values note the clamp in a trailing sentinel instead of erroring
+        (Kuzu hard-crashes above 30, and a hub node's full neighborhood would flood
+        an agent's context). Unknown refs raise with 'did you mean' candidates."""
+        # Validate filters for EVERY hops value: the multi-hop expansion ignores
+        # them by design (unlabeled), but a typo'd value must still be an error,
+        # not silently dropped (review follow-up on G5-A2).
+        if direction not in ("out", "in", "both"):
+            raise ValueError(f"direction must be one of ['both', 'in', 'out'], got {direction!r}")
+        if relation is not None and relation.upper() not in EDGE_TYPES:
+            raise ValueError(f"unknown relation {relation!r}; valid: {sorted(EDGE_TYPES)}")
+        rid = self._rid_or_raise(node_id)
+        clamped = max(1, min(int(hops), MAX_HOPS))
+        if clamped <= 1:
             types = [relation.upper()] if relation else None
             out = []
             for rel in self.store.relations(rid, direction=direction, types=types):
                 node = self._node(rel["id"])
                 if node:
                     out.append({**node, "relation": rel["relation"], "direction": rel["direction"]})
-            return out
-        return [n for n in (self._node(i) for i in self.store.neighbors(rid, hops=hops)) if n]
+        else:
+            out = [n for n in (self._node(i) for i in self.store.neighbors(rid, hops=clamped)) if n]
+        out = self._cap(out, NEIGHBOR_CAP, "filter by relation/direction or lower hops")
+        if clamped != hops:
+            out.append({"note": f"hops={hops} clamped to {clamped} (valid range 1..{MAX_HOPS})"})
+        return out
 
     def calls(self, node_id: str) -> list[dict]:
         """What this node calls (outgoing CALLS edges). Accepts an id or qualified name."""

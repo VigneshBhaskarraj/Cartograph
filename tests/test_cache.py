@@ -88,3 +88,24 @@ def test_unverified_dim_does_not_void_cache_hits(tmp_path):
     reused, embedded = embed_graph(Graph(nodes=[n]), embedder=_LazyDim(), cache=cache)
     assert (reused, embedded) == (1, 0)
     assert len(n.embedding) == 1024
+
+
+def test_corrupt_cache_resets_loudly(tmp_path):
+    """G5-B4: a corrupted cache used to be dropped silently — for an
+    Ollama-indexed monorepo that's hours of unexplained re-embedding."""
+    import pytest
+
+    p = tmp_path / "emb.hash.json"
+    p.write_text("{not json")
+    with pytest.warns(UserWarning, match="unreadable"):
+        c = EmbeddingCache.load(p)
+    assert c.data == {}
+
+
+def test_save_is_atomic_no_tmp_left_behind(tmp_path):
+    p = tmp_path / "emb.hash.json"
+    c = EmbeddingCache(p)
+    c.put("hello", [1.0, 2.0])
+    c.save()
+    assert EmbeddingCache.load(p).get("hello") == [1.0, 2.0]
+    assert list(tmp_path.glob("*.tmp")) == []

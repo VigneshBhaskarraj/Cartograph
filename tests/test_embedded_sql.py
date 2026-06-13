@@ -25,7 +25,11 @@ def test_embedded_sql_tables_fks_and_queries():
     refs = {(by_id[e.src].qualified_name, by_id[e.dst].name)
             for e in g.edges if e.type == "REFERENCES"}
     assert ("orders.user_id", "users") in refs
-    assert all(e.confidence == "EXTRACTED" for e in g.edges if e.type in ("QUERIES", "REFERENCES"))
+    # G5-C6 confidence split: FK structure inside parse-verified DDL is
+    # deterministic (EXTRACTED); QUERIES edges rest on regex string-sniffing +
+    # bare-name table matching — and the string may never execute — so INFERRED.
+    assert all(e.confidence == "EXTRACTED" for e in g.edges if e.type == "REFERENCES")
+    assert all(e.confidence == "INFERRED" for e in g.edges if e.type in ("QUERIES", "JOINS"))
 
 
 def test_same_table_in_sql_file_and_python_dedups_columns(tmp_path):

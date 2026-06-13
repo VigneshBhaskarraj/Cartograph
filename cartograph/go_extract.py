@@ -181,7 +181,11 @@ def extract_go_paths(paths: list[Path], root: Path) -> Graph:
         rel = path.relative_to(pkg_parent).as_posix() if path.is_relative_to(pkg_parent) else path.name
         src = path.read_bytes()
         fx = _GoFile(src, rel)
-        fx.run(parser.parse(src).root_node)
+        tree = parser.parse(src)
+        if tree.root_node.has_error:
+            import warnings  # tree-sitter never raises; partial graphs must not be silent (G5-C6)
+            warnings.warn(f"syntax errors in {rel}; its graph may be partial", stacklevel=2)
+        fx.run(tree.root_node)
         files.append(fx)
 
     nodes: list[Node] = [n for f in files for n in f.nodes]
@@ -190,6 +194,10 @@ def extract_go_paths(paths: list[Path], root: Path) -> Graph:
         if n.kind in ("function", "method", "class", "interface"):
             name_index.setdefault(n.name, []).append(n)
     by_id = {n.id: n for n in nodes}
+    # Go resolves unqualified identifiers package-wide, but node.module is
+    # per-FILE ("<pkg>.<stem>") — comparing modules made the "same scope" tier
+    # mean "same file" and let cross-package name collisions through (G5-C3).
+    pkg_of = {n.id: f.package for f in files for n in f.nodes}
     edges: list[Edge] = list({(e.type, e.src, e.dst): e for f in files for e in f.edges}.values())
     seen = {(e.type, e.src, e.dst) for e in edges}
 
@@ -203,37 +211,16 @@ def extract_go_paths(paths: list[Path], root: Path) -> Graph:
                 seen.add(("CONTAINS", parent, meth_id))
                 edges.append(Edge("CONTAINS", parent, meth_id, EXTRACTED))
 
-    def _type_of(n: Node) -> str | None:
-        return n.qualified_name.rsplit(".", 1)[0] if n.kind == "method" else None
+    # Shared tiered resolution (G5-C5): Go's lexical unit is the PACKAGE.
+    from .resolve import resolve_calls, resolve_inherits
 
-    for f in files:
-        for caller_id, name, is_recv in f.calls:
-            caller = by_id.get(caller_id)
-            cands = name_index.get(name, [])
-            chosen = None
-            if is_recv and caller is not None and caller.kind == "method":
-                same = [c for c in cands if _type_of(c) == _type_of(caller)]
-                if same:
-                    chosen = same
-            if chosen is None:
-                same_mod = [c for c in cands if caller and c.module == caller.module]
-                chosen = same_mod or cands
-            if len(chosen) > 8:
-                continue
-            for c in chosen:
-                if c.id != caller_id and ("CALLS", caller_id, c.id) not in seen:
-                    seen.add(("CALLS", caller_id, c.id))
-                    edges.append(Edge("CALLS", caller_id, c.id, INFERRED, "tree-sitter-go"))
+    def _package_of(n: Node):
+        return pkg_of.get(n.id)
 
-    for f in files:
-        for struct_id, base in f.bases:
-            matches = [c for c in name_index.get(base, [])
-                       if c.kind in ("class", "interface") and c.id != struct_id]
-            confidence = EXTRACTED if len(matches) == 1 else INFERRED
-            for c in matches:
-                if ("INHERITS", struct_id, c.id) not in seen:
-                    seen.add(("INHERITS", struct_id, c.id))
-                    edges.append(Edge("INHERITS", struct_id, c.id, confidence))
+    resolve_calls(((cid, name, is_recv) for f in files for cid, name, is_recv in f.calls),
+                  name_index, by_id, _package_of, seen, edges, "tree-sitter-go")
+    resolve_inherits(((sid, base) for f in files for sid, base in f.bases),
+                     name_index, by_id, _package_of, ("class", "interface"), seen, edges)
 
     ext: dict[str, Node] = {}
     for f in files:

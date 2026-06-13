@@ -110,3 +110,26 @@ def test_bare_entity_default_mapping_is_inferred(tmp_path):
     maps = [(by_id[e.src].name, by_id[e.dst].name, e.confidence)
             for e in g.edges if e.type == "MAPS_TO"]
     assert ("OwnerPet", "owner_pet", "INFERRED") in maps
+
+
+def test_cross_package_call_collision_resolved_to_same_package(tmp_path):
+    """G5-C3: `module` was per-file, so the same-scope tier meant same-FILE and
+    an unqualified call to a same-package helper in another file also matched a
+    same-named method in a different package."""
+    g = build_graph_from(tmp_path, [
+        ("B.java", "package shop;\nclass B {\n    boolean use() { return helper(); }\n"
+                   "    boolean helper() { return true; }\n}\n"),
+        ("H.java", "package shop;\nclass H {\n    static boolean helper() { return true; }\n}\n"),
+        ("C.java", "package other;\nclass C {\n    boolean helper() { return false; }\n}\n"),
+    ])
+    by_id = {n.id: n for n in g.nodes}
+    targets = {by_id[e.dst].qualified_name for e in g.edges
+               if e.type == "CALLS" and by_id[e.src].name == "use"}
+    assert any(t.startswith("shop.") for t in targets)
+    assert not any(t.startswith("other.") for t in targets)
+
+
+def build_graph_from(tmp_path, files):
+    for name, text in files:
+        (tmp_path / name).write_text(text)
+    return build_graph(tmp_path)

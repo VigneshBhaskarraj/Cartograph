@@ -1,4 +1,5 @@
-"""Thin CLI over the pipeline and retriever. No HTML viz (MVP non-goal)."""
+"""Thin CLI over the pipeline and the query service (plus an offline 3D graph
+explorer via `cartograph viz`)."""
 
 from __future__ import annotations
 
@@ -15,7 +16,6 @@ from .store import DEFAULT_DIM, Store
 app = typer.Typer(add_completion=False, help="Cartograph — local-first hybrid code retrieval.")
 
 DEFAULT_DB = os.environ.get("CARTOGRAPH_DB", "cartograph-out/graph.kuzu")
-QUERY_MODES = ("vector", "graph", "lexical", "hybrid")
 
 
 def _open_graph_or_exit(db: str) -> Store:
@@ -32,7 +32,7 @@ def _open_graph_or_exit(db: str) -> Store:
 
 @app.command()
 def index(
-    path: Path = typer.Argument(..., help="Python file or directory to index."),
+    path: Path = typer.Argument(..., help="Source file or directory (.py/.js/.ts/.java/.go/.sql)."),
     db: str = typer.Option(DEFAULT_DB, help="Kuzu DB path."),
     embedder: str = typer.Option(None, help="Embedder backend: hash | ollama."),
     no_cache: bool = typer.Option(False, "--no-cache", help="Ignore the embedding cache; re-embed all."),
@@ -56,7 +56,7 @@ def index(
 
 @app.command()
 def update(
-    path: Path = typer.Argument(..., help="Python/SQL file or directory to re-index."),
+    path: Path = typer.Argument(..., help="Source file or directory to re-index (.py/.js/.ts/.java/.go/.sql)."),
     db: str = typer.Option(DEFAULT_DB, help="Kuzu DB path."),
     embedder: str = typer.Option(None, help="Embedder backend: hash | ollama."),
     resolver: str = typer.Option("heuristic", help="Call resolver: heuristic | jedi."),
@@ -82,47 +82,51 @@ def update(
 def query(
     text: str = typer.Argument(..., help="Natural-language or symbol query."),
     db: str = typer.Option(DEFAULT_DB, help="Kuzu DB path."),
-    mode: str = typer.Option("hybrid", help="vector | graph | lexical | hybrid"),
-    k: int = typer.Option(10, help="Top-k results."),
+    mode: str = typer.Option("hybrid", help="vector | graph | lexical | hybrid | rerank "
+                                            "(rerank needs CARTOGRAPH_RERANKER)"),
+    k: int = typer.Option(10, help="Top-k results (clamped to 1..100)."),
     embedder: str = typer.Option(None, help="Embedder backend: hash | ollama."),
 ) -> None:
-    """Query the graph. Default mode runs the hybrid (RRF) fusion."""
-    if mode not in QUERY_MODES:
-        typer.echo(f"unknown mode {mode!r}; choose from: {', '.join(QUERY_MODES)}", err=True)
-        raise typer.Exit(2)
-    store = _open_graph_or_exit(db)
-    # Auto-detect the embedder recorded at index time unless overridden, so the query
-    # embeds with the same model the graph was built with (no hash-vs-ollama mismatch).
-    from .service import embedder_from_store
+    """Query the graph. Default mode runs the hybrid (RRF) fusion.
 
+    Routed through CartographService so CLI and MCP behave identically: same
+    validation, same k clamp, same embedder auto-detection, and `rerank` is
+    reachable here too when configured."""
+    from .service import QUERY_MODES
+
+    if mode not in (*QUERY_MODES, "rerank"):  # cheap static check before touching the DB
+        typer.echo(f"unknown mode {mode!r}; choose from: {', '.join((*QUERY_MODES, 'rerank'))}", err=True)
+        raise typer.Exit(2)
     try:
-        emb = get_embedder(embedder) if embedder else embedder_from_store(store)
-        retriever = Retriever(store, embedder=emb)
-        hits = retriever.retrieve(text, mode=mode, k=k)
+        emb = get_embedder(embedder) if embedder else None  # None -> auto-detect from graph meta
+    except ValueError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
+    svc = _service_or_exit(db, embedder=emb)
+    try:
+        hits = svc.query(text, mode=mode, k=k)
     except (ValueError, RuntimeError) as e:
-        # bad --embedder name, dim mismatch, Ollama unreachable, non-loopback host —
+        # rerank unconfigured, dim mismatch, Ollama unreachable, non-loopback host —
         # every message is already actionable; don't bury it in a traceback.
         typer.echo(str(e), err=True)
         raise typer.Exit(1)
+    finally:
+        svc.close()
     if not hits:
         typer.echo("(no results)")
-    for rank, (node_id, score) in enumerate(hits, 1):
-        node = store.get_node(node_id)
-        label = node["qualified_name"] if node else node_id
-        kind = node["kind"] if node else "?"
-        typer.echo(f"{rank:2}. [{kind}] {label}  ({score:.4f})")
-    store.close()
+    for rank, h in enumerate(hits, 1):
+        typer.echo(f"{rank:2}. [{h['kind']}] {h['qualified_name']}  ({h['score']:.4f})")
 
 
 # -- structural commands ------------------------------------------------------
 # The same graph surface the MCP server exposes, but over the shell: any agent
 # that can run a command can use the graph — no MCP wiring required.
 
-def _service_or_exit(db: str):
+def _service_or_exit(db: str, embedder=None):
     from .service import CartographService
 
     try:
-        return CartographService(db)
+        return CartographService(db, embedder=embedder)
     except (FileNotFoundError, RuntimeError) as e:
         typer.echo(str(e), err=True)
         raise typer.Exit(1)
@@ -287,7 +291,11 @@ def demo(
     path: Path = typer.Argument(..., help="Python file to run the M0 vertical slice on."),
 ) -> None:
     """M0 slice: index one file, then answer one query via BOTH vector and graph."""
-    store = index_path(path, Path("cartograph-out/demo.kuzu"), overwrite=True)
+    try:
+        store = index_path(path, Path("cartograph-out/demo.kuzu"), overwrite=True)
+    except (FileNotFoundError, ValueError, RuntimeError) as e:  # same friendly contract as index
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
     retriever = Retriever(store)
     typer.echo("== vector ==")
     for nid, s in retriever.vector("function", k=3):
@@ -311,7 +319,9 @@ def serve(db: str = typer.Option(DEFAULT_DB, help="Kuzu DB path to serve.")) -> 
 
     try:
         serve_main()
-    except ModuleNotFoundError:  # pragma: no cover - mcp extra absent
+    except ModuleNotFoundError as e:  # pragma: no cover - mcp extra absent
+        if not (e.name or "").startswith("mcp"):
+            raise  # an unrelated missing module must not masquerade as the mcp extra
         typer.echo("MCP SDK not installed. Run: uv sync --extra mcp", err=True)
         raise typer.Exit(1)
     except (FileNotFoundError, RuntimeError) as e:  # missing/old graph — say so cleanly
