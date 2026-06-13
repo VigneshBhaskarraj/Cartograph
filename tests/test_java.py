@@ -133,3 +133,34 @@ def build_graph_from(tmp_path, files):
     for name, text in files:
         (tmp_path / name).write_text(text)
     return build_graph(tmp_path)
+
+
+def test_javadoc_folds_into_embed_text(tmp_path):
+    """G6-pre: Java SEMANTIC recall was starved because javadoc never reached
+    embed_text (Python docstrings do). Class + method javadoc must be captured;
+    ordinary block comments and @tags must not pollute it."""
+    (tmp_path / "Order.java").write_text(
+        "package shop;\n\n"
+        "/**\n"
+        " * A customer order. Tracks the running total and payment state.\n"
+        " * @author vike\n"
+        " */\n"
+        "public class Order {\n"
+        "    /* not javadoc — must be ignored */\n"
+        "    private long total;\n\n"
+        "    /**\n"
+        "     * Returns whether this order has been fully paid in cents.\n"
+        "     * @return true when paid\n"
+        "     */\n"
+        "    public boolean isPaid() { return total > 0; }\n"
+        "}\n")
+    g = build_graph(tmp_path)
+    by_qual = {n.qualified_name: n for n in g.nodes}
+    cls = by_qual["shop.Order"]
+    assert "running total and payment state" in cls.embed_text
+    assert cls.docstring.startswith("A customer order")
+    assert "@author" not in cls.embed_text  # tag lines dropped
+    meth = by_qual["shop.Order.isPaid"]
+    assert "fully paid in cents" in meth.embed_text
+    assert "@return" not in meth.embed_text
+    assert "not javadoc" not in meth.embed_text and "not javadoc" not in cls.embed_text

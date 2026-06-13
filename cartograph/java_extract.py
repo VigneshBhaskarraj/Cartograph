@@ -35,6 +35,30 @@ def _sha(t: str) -> str:
     return hashlib.sha256(t.encode("utf-8", "replace")).hexdigest()
 
 
+def _javadoc(text: str) -> str:
+    """Plain prose from a `/** … */` javadoc block; drops the `*` gutter and
+    @param/@return/@throws tag lines (the natural-language summary is what carries
+    SEMANTIC recall, mirroring how Python docstrings feed embed_text)."""
+    t = text.strip()
+    if not t.startswith("/**"):
+        return ""  # only javadoc, not ordinary /* */ block comments
+    t = t[3:-2] if t.endswith("*/") else t[3:]
+    out = []
+    for ln in t.splitlines():
+        ln = ln.strip().lstrip("*").strip()
+        if ln and not ln.startswith("@"):
+            out.append(ln)
+    return " ".join(out)
+
+
+def _preceding_doc(decl) -> str:
+    """Javadoc immediately preceding a declaration (its prev sibling)."""
+    sib = decl.prev_sibling
+    if sib is not None and sib.type in ("block_comment", "comment"):
+        return _javadoc(sib.text.decode("utf-8", "replace"))
+    return ""
+
+
 class _JavaFile:
     def __init__(self, src: bytes, rel_path: str):
         self.src = src
@@ -53,14 +77,17 @@ class _JavaFile:
     def _first_line(self, n) -> str:
         return re.sub(r"\s+", " ", self._text(n).split("\n", 1)[0]).strip().rstrip("{").strip()
 
-    def _node(self, kind: str, name: str, qual: str, n) -> Node:
+    def _node(self, kind: str, name: str, qual: str, n, doc: str = "") -> Node:
         line = n.start_point[0] + 1
+        embed = f"{kind} {qual}\n{self._first_line(n)}"
+        if doc:
+            embed += f"\n{doc}"  # javadoc prose drives SEMANTIC recall
         node = Node(
             id=f"{self.rel_path}::{qual}#{line}", kind=kind, name=name, qualified_name=qual,
             module=self.module_node.qualified_name if self.module_node else qual,
             file_path=self.rel_path, start_line=line, end_line=n.end_point[0] + 1,
-            signature=self._first_line(n),
-            embed_text=f"{kind} {qual}\n{self._first_line(n)}".strip(),
+            signature=self._first_line(n), docstring=doc,
+            embed_text=embed.strip(),
             content_sha=_sha(self._text(n)),
         )
         self.nodes.append(node)
@@ -126,7 +153,7 @@ class _JavaFile:
             return
         name = self._text(name_n)
         qual = f"{enclosing_qual}.{name}"
-        node = self._node(_KIND[decl.type], name, qual, decl)
+        node = self._node(_KIND[decl.type], name, qual, decl, doc=_preceding_doc(decl))
         self.edges.append(Edge("CONTAINS", parent_id, node.id, EXTRACTED))
         annos = self._annotations(decl)
         if "Entity" in annos or "Table" in annos:
@@ -161,7 +188,7 @@ class _JavaFile:
                 if name_n is None:
                     continue
                 name = self._text(name_n)
-                meth = self._node("method", name, f"{enclosing_qual}.{name}", m)
+                meth = self._node("method", name, f"{enclosing_qual}.{name}", m, doc=_preceding_doc(m))
                 self.edges.append(Edge("CONTAINS", owner.id, meth.id, EXTRACTED))
                 blk = m.child_by_field_name("body")
                 if blk is not None:
