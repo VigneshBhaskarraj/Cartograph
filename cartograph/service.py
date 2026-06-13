@@ -281,6 +281,31 @@ class CartographService:
     _DATA_KINDS = ("table", "column")
     _BRIDGE = ("QUERIES", "MAPS_TO")  # code -> data edges
 
+    # Machine-readable limitation codes so an agent (or a migration workflow) can
+    # branch on WHY a blast radius is not exhaustive instead of parsing prose.
+    _IMPACT_LIMITS = {
+        "inferred_calls": "call edges are heuristic (INFERRED): the transitive set "
+                          "may include false positives and miss dynamic or "
+                          "cross-language calls",
+        "orm_attribute_access": "field access on a mapped model (e.g. self.email) "
+                               "has no QUERIES edge; code touching a column only "
+                               "through ORM attributes may be absent",
+        "fk_join_ripple": "foreign-key / JOIN dependencies between tables are not "
+                         "followed; code touching tables that reference this one "
+                         "is not included",
+    }
+
+    def _impact_completeness(self, direction: str) -> dict:
+        """An impact result is never a proof — report the approximation modes as
+        structured codes (the bank-pilot condition: a populated radius must not be
+        mistaken for a complete one)."""
+        codes = ["inferred_calls", "orm_attribute_access"]
+        if direction == "data->code":
+            codes.append("fk_join_ripple")  # dropping this table can break FK-linked tables
+        return {"exhaustive": False,
+                "advisory_only": True,
+                "limitations": [{"code": c, "detail": self._IMPACT_LIMITS[c]} for c in codes]}
+
     def _typed_adj(self) -> dict:
         """Lazy one-time adjacency over typed edges: forward/reverse CALLS and the
         code->data bridge, all in RAM (built from the graph, never source files)."""
@@ -354,7 +379,8 @@ class CartographService:
                     "direct_code": _nodes(direct),
                     "transitive_callers": _nodes(transitive),
                     "total_code_paths": total,
-                    "truncated": len(direct) > max_results or len(transitive) > max_results}
+                    "truncated": len(direct) > max_results or len(transitive) > max_results,
+                    "completeness": self._impact_completeness("data->code")}
 
         # Module/class scope descends CONTAINS first (a module "touches" what its
         # functions touch), then the call graph expands it.
@@ -367,7 +393,8 @@ class CartographService:
                 "direct_data": _nodes(direct),
                 "transitive_data": _nodes(rest),
                 "total_data_touched": len(data),
-                "truncated": len(direct) > max_results or len(rest) > max_results}
+                "truncated": len(direct) > max_results or len(rest) > max_results,
+                "completeness": self._impact_completeness("code->data")}
 
     def shortest_path(self, src: str, dst: str) -> list[dict]:
         """Ordered nodes on a shortest path between two nodes (ids or qualified names)."""

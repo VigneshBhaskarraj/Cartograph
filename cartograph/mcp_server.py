@@ -102,9 +102,11 @@ def build_server(service: CartographService | None = None, db_path: str | None =
         which code touches it directly (a mapped ORM class implicates its methods)
         and every function that can reach that code ("what breaks if I drop
         users.email"). For a code symbol: every table/column reachable through its
-        scope and transitive callees. Caveats: the CALLS expansion over-approximates
-        (INFERRED edges), but the bridge can MISS ORM attribute access, and FK/JOIN
-        ripple between tables is not followed — results are not guaranteed supersets."""
+        scope and transitive callees. The result carries a machine-readable
+        `completeness` block (`exhaustive: false`, `advisory_only: true`, and a
+        `limitations` list of codes like inferred_calls / orm_attribute_access /
+        fk_join_ripple) — treat a populated radius as advisory, never as a complete
+        proof of what a schema change will break."""
         return svc().impact(ref)
 
     @mcp.tool()

@@ -94,33 +94,65 @@ def test_serve_missing_db_stays_up_and_reports_through_mcp(tmp_path):
     """serve must NOT die on a bad DB (the client would see only "Connection
     closed") — it warns on stderr, completes the handshake, and returns the
     friendly error from tool calls. Real subprocess: a stdio server can't be
-    exercised honestly under CliRunner."""
+    exercised honestly under CliRunner.
+
+    Driven by streaming the replies while stdin stays OPEN: piping all frames and
+    waiting for exit is racy — closing stdin shuts the server down, and the
+    shutdown cancels the in-flight tool handler before it flushes its response
+    (the historical flake, seen as both timeouts and a missing id=2 reply). We
+    instead read until both replies arrive, THEN kill the process."""
     import json
+    import select
     import subprocess
     import sys
+    import time
 
     import pytest
 
     pytest.importorskip("mcp")
     db = str(tmp_path / "missing.kuzu")
-    frames = "\n".join(json.dumps(m) for m in [
+    frames = "".join(json.dumps(m) + "\n" for m in [
         {"jsonrpc": "2.0", "id": 1, "method": "initialize",
          "params": {"protocolVersion": "2024-11-05", "capabilities": {},
                     "clientInfo": {"name": "test", "version": "0"}}},
         {"jsonrpc": "2.0", "method": "notifications/initialized"},
         {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
          "params": {"name": "query", "arguments": {"text": "x"}}},
-    ]) + "\n"
-    proc = subprocess.run(
+    ])
+    proc = subprocess.Popen(
         [sys.executable, "-c",
          f"import sys; from cartograph.cli import app; sys.argv = ['cartograph', 'serve', '--db', {db!r}]; app()"],
-        # 60s was too tight under full-suite load (cold interpreter + mcp import +
-        # stdio handshake on a busy CI box); generous so the test is deterministic.
-        input=frames, capture_output=True, text=True, timeout=180)
-    assert "no graph at" in proc.stderr  # preflight warning for the human
-    replies = {m.get("id"): m for m in map(json.loads, proc.stdout.splitlines())}
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    replies: dict = {}
+    try:
+        proc.stdin.write(frames)
+        proc.stdin.flush()
+        deadline = time.time() + 60
+        buf = ""
+        while time.time() < deadline and not ({1, 2} <= set(replies)):
+            remaining = deadline - time.time()
+            if not select.select([proc.stdout], [], [], remaining)[0]:
+                break  # no output before deadline → real hang, fail below
+            chunk = proc.stdout.readline()  # readable per select; returns a full line
+            if not chunk:
+                break
+            try:
+                m = json.loads(chunk)
+            except ValueError:
+                continue
+            if m.get("id") is not None:
+                replies[m["id"]] = m
+    finally:
+        proc.stdin.close()
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+    stderr = proc.stderr.read()
+    assert "no graph at" in stderr  # preflight warning for the human
     assert "serverInfo" in replies[1]["result"]  # handshake survived the bad DB
-    tool_result = replies[2]["result"]
+    tool_result = replies[2]["result"]  # tool reply was flushed (stdin kept open)
     assert tool_result["isError"] is True
     assert "no graph at" in tool_result["content"][0]["text"]  # actionable error reached the agent
 

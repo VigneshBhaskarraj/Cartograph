@@ -240,8 +240,10 @@ def impact(
         total = result["total_data_touched"]
         suffix = f" (showing {shown_d + shown_t} of {total})" if result["truncated"] else ""
         typer.echo(f"\ntotal tables/columns touched: {total}{suffix}")
-    typer.echo("\nnote: the CALLS expansion over-approximates (INFERRED edges); the bridge can miss"
-               "\nORM attribute access, and FK/JOIN ripple between tables is not followed.")
+    comp = result["completeness"]
+    typer.echo(f"\ncompleteness: NOT EXHAUSTIVE — advisory only, not a proof. Limitations:")
+    for lim in comp["limitations"]:
+        typer.echo(f"  - {lim['code']}: {lim['detail']}")
     svc.close()
 
 
