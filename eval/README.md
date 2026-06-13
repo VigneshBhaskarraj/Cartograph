@@ -55,8 +55,12 @@ Java joined the evaluated tier: spring-petclinic (12 questions) scores hybrid/ve
 **0.833 r@5/r@10** vs grep 0.583/0.75 and naive-rag 0.417/0.75 — the code<->data
 CROSS questions hit 1.0. Known gap: SEMANTIC recall@10 is 0.333 on Java for every
 retriever — javadoc is not yet extracted into embedding text (Python docstrings are);
-recorded as the next extractor improvement. Six-corpus means: hybrid 0.874/0.932/0.732,
-vector 0.847/0.912/0.712, grep 0.543/0.683/0.379, naive-rag 0.507/0.725/0.259.
+recorded as the next extractor improvement. Six-corpus means (re-measured after the
+Gate-5 hardening): hybrid 0.874/0.932/0.732, vector 0.847/0.912/0.712, grep
+0.576/0.717/0.396, naive-rag 0.540/0.758/0.279. Retriever rows are unchanged from the
+pre-Gate-5 run; both baselines rose only on the bridge corpus because the SQL
+line-number fix (G5-B3) maps their text hits onto the correct table/column nodes —
+i.e. the baselines got stronger because the graph got more correct.
 
 ### Earlier validated run — 89 questions / 5 corpora (2026-06-11)
 

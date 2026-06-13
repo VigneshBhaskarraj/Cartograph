@@ -118,8 +118,8 @@ out from all tuning). Mean across corpora:
 
 | system | recall@5 | recall@10 | mrr |
 |---|---|---|---|
-| naive-rag (structure-blind chunks) | 0.51 | 0.73 | 0.26 |
-| grep over raw source | 0.54 | 0.68 | 0.38 |
+| naive-rag (structure-blind chunks) | 0.54 | 0.76 | 0.28 |
+| grep over raw source | 0.58 | 0.72 | 0.40 |
 | vector (single signal) | 0.85 | 0.91 | 0.71 |
 | **Cartograph hybrid** | **0.87** | **0.93** | **0.73** |
 
