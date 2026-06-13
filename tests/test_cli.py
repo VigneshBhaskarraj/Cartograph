@@ -114,7 +114,9 @@ def test_serve_missing_db_stays_up_and_reports_through_mcp(tmp_path):
     proc = subprocess.run(
         [sys.executable, "-c",
          f"import sys; from cartograph.cli import app; sys.argv = ['cartograph', 'serve', '--db', {db!r}]; app()"],
-        input=frames, capture_output=True, text=True, timeout=60)
+        # 60s was too tight under full-suite load (cold interpreter + mcp import +
+        # stdio handshake on a busy CI box); generous so the test is deterministic.
+        input=frames, capture_output=True, text=True, timeout=180)
     assert "no graph at" in proc.stderr  # preflight warning for the human
     replies = {m.get("id"): m for m in map(json.loads, proc.stdout.splitlines())}
     assert "serverInfo" in replies[1]["result"]  # handshake survived the bad DB
