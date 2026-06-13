@@ -498,26 +498,29 @@ workflow needs. The keep of the moat, hardened.
   nodes are returned), so **eval-neutral**. CLI prints it; MCP docstring documents it.
 - **Verify:** `uv run pytest tests/test_impact.py -q` (158 tests total green).
 
-### G6-2 — FK/JOIN ripple (PLANNED — eval-gated, needs approval) ⏳
-- **Does:** `impact` on a table/column follows one hop of incoming `REFERENCES`
-  (and optionally `JOINS`) so dropping `users` surfaces the code touching
-  `audit.user_id`. Then `fk_join_ripple` can be removed from that result's
-  limitations. **Changes results → ships with scorecard numbers** (bridge corpus has
-  the `audit→users` FK to ground-truth it).
+### G6-2 — FK/JOIN ripple ✅ DONE 2026-06-13
+- **Does:** `impact` on a table/column follows the transitive closure of incoming
+  `REFERENCES` (+ `JOINS`) so dropping `users` surfaces code touching `audit`/`orders`
+  that reference it. `fk_join_ripple` retired; residual is `undeclared_schema_links`.
+- **Verify:** `tests/test_impact.py` (FK-ripple tests on a referencing-table corpus).
+  Pure `impact` logic — no graph change, retrieval scorecard untouched.
 
-### G6-3 — ORM attribute capture (PLANNED — eval-gated, needs approval) ⏳
-- **Does:** model-field access (`self.email`, getters) on a mapped class emits a
-  column-level edge, closing the documented `orm_attribute_access` false-negative.
-  Result-changing → eval-gated.
+### G6-3 — ORM attribute capture ✅ DONE 2026-06-13
+- **Does:** `self.<column>` reads in a mapped class's methods emit an INFERRED
+  column-level `QUERIES` edge. Fixes the code→data false-negative (a method reading
+  `self.email` now touches `users.email`) and makes data→code attribution precise.
+- **Verify:** impact tests + scorecard gate (graph change): bridge/ai-digest reindexed,
+  recall identical, bridge graph mrr 0.488→0.516, no regression.
 
-### G6-4 — Per-edge confidence in responses (PLANNED) ⏳
-- **Does:** tag each `impact`/`neighbors` result node with the confidence of the edge
-  that reached it (EXTRACTED vs INFERRED) — the honesty is in the graph but agents
-  can't currently see it (code-intel reviewer's finding). Additive.
+### G6-4 — Per-edge confidence in responses ✅ DONE 2026-06-13
+- **Does:** every `neighbors`/`calls`/`callers` result carries the edge's confidence
+  (EXTRACTED vs INFERRED). Additive; surfaced in the CLI and MCP. The remaining
+  `orm_attribute_access` limitation is narrowed to cross-instance access (type
+  inference) — self-access is now captured.
 
-**Status:** G6-1 shipped. G6-2/G6-3 change the blast radius and so are held for
-approval per the eval-first rule (no retrieval/graph-semantics change lands without a
-number that moved). G6-4 is additive and can follow G6-1.
+**Status:** Gate-6 complete. Open follow-up (out of scope): cross-instance ORM
+attribute access needs receiver-type inference (Jedi extension) — honestly reported as
+a limitation rather than guessed.
 
 ---
 

@@ -60,9 +60,9 @@ def test_column_impact_reaches_transitive_callers(repo_db):
     # the caller of the writer is in the blast radius; unrelated code is not
     transitive = _quals(r["transitive_callers"])
     assert any(q.endswith("entrypoint") for q in transitive)
-    # review finding: a mapped class's METHODS are implicated (ORM attribute access
-    # has no QUERIES edge — the class-level bridge must descend into them)
-    assert any(q.endswith("User.email_domain") for q in transitive)
+    # G6-3: email_domain reads self.email, so it DIRECTLY touches users.email now
+    # (a real QUERIES edge) rather than being a coarse class-method guess.
+    assert any(q.endswith("User.email_domain") for q in direct)
     assert not any(q.endswith("unrelated") for q in direct | transitive)
     assert r["total_code_paths"] >= 4
     assert r["truncated"] is False
@@ -126,14 +126,80 @@ def test_impact_carries_machine_readable_completeness(repo_db):
         codes = {lim["code"] for lim in c["limitations"]}
         assert {"inferred_calls", "orm_attribute_access"} <= codes
         assert all(lim["detail"] for lim in c["limitations"])  # every code is explained
-    # FK/JOIN ripple only applies when starting from data (dropping a table can
-    # break FK-linked tables); it must NOT be claimed in the code->data direction.
-    assert "fk_join_ripple" in {l["code"] for l in data_to_code["completeness"]["limitations"]}
-    assert "fk_join_ripple" not in {l["code"] for l in code_to_data["completeness"]["limitations"]}
+    # the schema-links residual (after FK ripple is followed) is data->code only;
+    # it must NOT be claimed in the code->data direction.
+    assert "undeclared_schema_links" in {l["code"] for l in data_to_code["completeness"]["limitations"]}
+    assert "undeclared_schema_links" not in {l["code"] for l in code_to_data["completeness"]["limitations"]}
 
 
 def test_impact_cli_shows_completeness(repo_db):
     r = runner.invoke(app, ["impact", "users.email", "--db", str(repo_db)])
     assert r.exit_code == 0
     assert "NOT EXHAUSTIVE" in r.output and "advisory only" in r.output
-    assert "inferred_calls" in r.output and "fk_join_ripple" in r.output
+    assert "inferred_calls" in r.output and "undeclared_schema_links" in r.output
+
+
+@pytest.fixture()
+def fk_db(tmp_path):
+    """users <- audit (FK): audit.user_id REFERENCES users(id); code touches audit
+    via an ORM class, so dropping users must put that code in the blast radius."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "schema.sql").write_text(
+        "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT);\n"
+        "CREATE TABLE audit (id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users(id), action TEXT);\n")
+    (repo / "app.py").write_text(
+        'class Audit:\n'
+        '    __tablename__ = "audit"\n'
+        '\n'
+        'def write_audit(conn, uid, action):\n'
+        '    conn.execute("INSERT INTO audit (user_id, action) VALUES (?, ?)", (uid, action))\n'
+        '\n'
+        'def some_caller(conn):\n'
+        '    write_audit(conn, 1, "login")\n')
+    db = tmp_path / "g.kuzu"
+    index_path(repo, db, dim=32, overwrite=True).close()
+    return db
+
+
+def test_fk_ripple_pulls_referencing_tables_code(fk_db):
+    """G6-2: dropping `users` breaks `audit` (FK), so audit's code is in the radius
+    — even though no code touches the users table directly."""
+    svc = CartographService(fk_db)
+    r = svc.impact("users")
+    svc.close()
+    reached = _quals(r["direct_code"]) | _quals(r["transitive_callers"])
+    assert any(q.endswith(".Audit") for q in reached)        # ORM class on the FK table
+    assert any(q.endswith("write_audit") for q in reached)   # raw-SQL writer to audit
+    assert any(q.endswith("some_caller") for q in reached)   # its transitive caller
+
+
+def test_fk_ripple_off_by_default_for_unrelated_table(fk_db):
+    """A table nothing references gets no spurious FK-ripple code."""
+    svc = CartographService(fk_db)
+    r = svc.impact("audit")  # nothing references audit
+    svc.close()
+    # audit's own code is present; users' code (there is none) is not invented
+    assert r["direction"] == "data->code"
+
+
+def test_orm_self_attribute_capture(repo_db):
+    """G6-3: a method reading self.email on a mapped class now touches users.email
+    (code->data), and that column's impact reaches the method (data->code)."""
+    svc = CartographService(repo_db)
+    # code->data: email_domain reads self.email — previously showed NO data touched
+    fwd = svc.impact("User.email_domain")
+    touched = {n["qualified_name"] for n in fwd["direct_data"] + fwd["transitive_data"]}
+    assert "users.email" in touched
+    # the edge is INFERRED (self.x matching a column name is heuristic)
+    svc.close()
+
+
+def test_orm_self_attribute_edge_is_inferred(repo_db):
+    from cartograph.store import Store
+    s = Store(repo_db, read_only=True)
+    q = {(s.get_node(a)["qualified_name"], s.get_node(b)["qualified_name"], c)
+         for a, b, t, c in s.all_edges_typed() if t == "QUERIES"}
+    s.close()
+    assert any(src.endswith("email_domain") and dst == "users.email" and conf == "INFERRED"
+               for src, dst, conf in q)

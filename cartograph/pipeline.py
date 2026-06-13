@@ -230,8 +230,9 @@ def _extract_embedded_sql(graph: Graph) -> None:
 
 def _bridge_models_to_tables(graph: Graph) -> None:
     """Link ORM model classes to their SQL tables (MAPS_TO) — the code<->schema bridge.
-    Mapping comes from an explicit `__tablename__`, so it's EXTRACTED."""
-    from .model import EXTRACTED, Edge
+    Mapping comes from an explicit `__tablename__`, so it's EXTRACTED. Method-level
+    `self.<column>` reads become INFERRED QUERIES edges (G6-3 ORM attribute capture)."""
+    from .model import EXTRACTED, INFERRED, Edge
 
     by_qual = {n.qualified_name: n for n in graph.nodes if n.kind == "table"}
     by_name: dict[str, Node] = {}
@@ -240,6 +241,14 @@ def _bridge_models_to_tables(graph: Graph) -> None:
             by_name.setdefault(n.name, n)
     seen = {(e.type, e.src, e.dst) for e in graph.edges}
     cols = {c.qualified_name: c for c in graph.nodes if c.kind == "column"}
+    # Methods of each class, via CONTAINS — to attribute their self.<col> reads.
+    node_by_id = {x.id: x for x in graph.nodes}
+    methods_of: dict[str, list[Node]] = {}
+    for e in graph.edges:
+        if e.type == "CONTAINS":
+            child = node_by_id.get(e.dst)
+            if child is not None and child.kind == "method":
+                methods_of.setdefault(e.src, []).append(child)
     for n in graph.nodes:
         tn = n.extra.get("tablename") if n.kind == "class" else None
         if not tn:
@@ -258,6 +267,15 @@ def _bridge_models_to_tables(graph: Graph) -> None:
                 if cn is not None and ("MAPS_TO", n.id, cn.id) not in seen:
                     seen.add(("MAPS_TO", n.id, cn.id))
                     graph.edges.append(Edge("MAPS_TO", n.id, cn.id, conf))
+        # G6-3: a method reading self.<col> on a mapped class touches that column.
+        # INFERRED — `self.x` matching a column name is a heuristic (x could be a
+        # method or an unrelated attribute that happens to share the name).
+        for m in methods_of.get(n.id, ()):
+            for attr in m.extra.get("self_attrs", ()):
+                cn = cols.get(f"{tgt.name}.{attr}") or cols.get(f"{tgt.qualified_name}.{attr}")
+                if cn is not None and ("QUERIES", m.id, cn.id) not in seen:
+                    seen.add(("QUERIES", m.id, cn.id))
+                    graph.edges.append(Edge("QUERIES", m.id, cn.id, INFERRED))
 
 
 def embed_graph(graph: Graph, embedder=None, cache: EmbeddingCache | None = None) -> tuple[int, int]:
