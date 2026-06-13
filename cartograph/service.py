@@ -261,7 +261,8 @@ class CartographService:
             for rel in self.store.relations(rid, direction=direction, types=types):
                 node = self._node(rel["id"])
                 if node:
-                    out.append({**node, "relation": rel["relation"], "direction": rel["direction"]})
+                    out.append({**node, "relation": rel["relation"], "direction": rel["direction"],
+                                "confidence": rel["confidence"]})
         else:
             out = [n for n in (self._node(i) for i in self.store.neighbors(rid, hops=clamped)) if n]
         out = self._cap(out, NEIGHBOR_CAP, "filter by relation/direction or lower hops")
@@ -287,12 +288,12 @@ class CartographService:
         "inferred_calls": "call edges are heuristic (INFERRED): the transitive set "
                           "may include false positives and miss dynamic or "
                           "cross-language calls",
-        "orm_attribute_access": "field access on a mapped model (e.g. self.email) "
-                               "has no QUERIES edge; code touching a column only "
-                               "through ORM attributes may be absent",
-        "fk_join_ripple": "foreign-key / JOIN dependencies between tables are not "
-                         "followed; code touching tables that reference this one "
-                         "is not included",
+        "orm_attribute_access": "attribute access on a mapped model instance "
+                               "(e.g. other_obj.email) needs type inference; code "
+                               "touching a column only that way may be absent",
+        "undeclared_schema_links": "only FK / JOIN relationships present in the "
+                                  "indexed schema are followed; convention-only or "
+                                  "unindexed foreign keys are not",
     }
 
     def _impact_completeness(self, direction: str) -> dict:
@@ -301,20 +302,24 @@ class CartographService:
         mistaken for a complete one)."""
         codes = ["inferred_calls", "orm_attribute_access"]
         if direction == "data->code":
-            codes.append("fk_join_ripple")  # dropping this table can break FK-linked tables
+            # FK/JOIN ripple IS now followed (G6-2); the residual is undeclared FKs.
+            codes.append("undeclared_schema_links")
         return {"exhaustive": False,
                 "advisory_only": True,
                 "limitations": [{"code": c, "detail": self._IMPACT_LIMITS[c]} for c in codes]}
 
     def _typed_adj(self) -> dict:
-        """Lazy one-time adjacency over typed edges: forward/reverse CALLS and the
-        code->data bridge, all in RAM (built from the graph, never source files)."""
+        """Lazy one-time adjacency over typed edges: forward/reverse CALLS, the
+        code->data bridge, and table dependencies (FK + JOIN), all in RAM (built
+        from the graph, never source files)."""
         if not hasattr(self, "_adj"):
             calls_fwd: dict[str, list[str]] = {}
             calls_rev: dict[str, list[str]] = {}
             to_data: dict[str, list[str]] = {}
             from_data: dict[str, list[str]] = {}
             contains: dict[str, list[str]] = {}
+            references: list[tuple[str, str]] = []  # (referencing col/table, referenced table)
+            joins: list[tuple[str, str]] = []        # (table, table) — query co-occurrence
             for src, dst, etype, _conf in self.store.all_edges_typed():
                 if etype == "CALLS":
                     calls_fwd.setdefault(src, []).append(dst)
@@ -324,9 +329,41 @@ class CartographService:
                     from_data.setdefault(dst, []).append(src)
                 elif etype == "CONTAINS":
                     contains.setdefault(src, []).append(dst)
+                elif etype == "REFERENCES":
+                    references.append((src, dst))
+                elif etype == "JOINS":
+                    joins.append((src, dst))
+            # table_deps[T] = tables that BREAK if T is dropped: those whose column
+            # FK-references T (incoming REFERENCES), plus JOIN-coupled tables.
+            parent_of = {c: p for p, kids in contains.items() for c in kids}
+            tables = self.store.ids_of_kind("table")
+            table_deps: dict[str, set[str]] = {}
+            for col_src, tbl_dst in references:
+                rt = parent_of.get(col_src, col_src)  # the referencing column's table
+                if rt in tables:
+                    table_deps.setdefault(tbl_dst, set()).add(rt)
+            for a, b in joins:
+                table_deps.setdefault(a, set()).add(b)
+                table_deps.setdefault(b, set()).add(a)
             self._adj = {"fwd": calls_fwd, "rev": calls_rev,
-                         "to_data": to_data, "from_data": from_data, "contains": contains}
+                         "to_data": to_data, "from_data": from_data, "contains": contains,
+                         "table_deps": table_deps}
         return self._adj
+
+    def _dependent_tables(self, tables: set[str], adj: dict) -> set[str]:
+        """Transitive closure of tables that break if any of `tables` is dropped
+        (FK + JOIN). The honest blast radius across the schema graph (G6-2)."""
+        out: set[str] = set()
+        frontier = set(tables)
+        while frontier:
+            nxt: set[str] = set()
+            for t in frontier:
+                for dep in adj["table_deps"].get(t, ()):  # noqa: SIM118
+                    if dep not in out and dep not in tables:
+                        out.add(dep)
+                        nxt.add(dep)
+            frontier = nxt
+        return out
 
     @staticmethod
     def _closure(starts: list[str], step: dict[str, list[str]]) -> list[str]:
@@ -347,10 +384,13 @@ class CartographService:
         breaks if this column changes". For code (function/class/module): every
         table/column reachable through its scope and transitive callees.
 
-        Honesty: the CALLS expansion over-approximates (those edges are
-        INFERRED). The bridge itself can MISS ORM attribute access that has no
-        QUERIES edge, so results are NOT guaranteed supersets; FK/JOIN ripple
-        between tables is not followed. Reads only the graph.
+        For a table/column the radius also follows FK/JOIN ripple (G6-2): tables
+        that reference (or are JOINed with) the target break too, so their code is
+        included. Every result carries a machine-readable `completeness` block.
+
+        Honesty: the CALLS expansion over-approximates (those edges are INFERRED);
+        cross-instance ORM attribute access needs type inference and may be missed;
+        only schema links present in the index are followed. Reads only the graph.
         """
         rid = self._rid(ref)
         if rid is None:
@@ -365,9 +405,18 @@ class CartographService:
             targets = [rid]
             if node["kind"] == "table":  # a table change implicates its columns too
                 targets += adj["contains"].get(rid, [])
+                base_tables = {rid}
             else:  # a column change implicates code mapped to its parent table (ORM)
-                targets += [t for t, cols in adj["contains"].items() if rid in cols
-                            and (p := self.store.get_node(t)) and p["kind"] == "table"]
+                parents = [t for t, cols in adj["contains"].items() if rid in cols
+                           and (p := self.store.get_node(t)) and p["kind"] == "table"]
+                targets += parents
+                base_tables = set(parents)
+            # G6-2: FK/JOIN ripple — dropping this table also breaks tables that
+            # reference it (or are JOINed with it), so their code is in the radius.
+            dep_tables = self._dependent_tables(base_tables, adj)
+            for t in dep_tables:
+                targets.append(t)
+                targets += adj["contains"].get(t, [])
             direct = sorted({c for t in targets for c in adj["from_data"].get(t, [])})
             # The ORM bridge is class-level (MAPS_TO): the mapped class's methods
             # are implicated too, so they seed the caller closure alongside it.

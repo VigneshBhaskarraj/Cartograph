@@ -246,3 +246,23 @@ def test_invalid_filters_raise_even_multihop(db):
     with pytest.raises(ValueError, match="relation"):
         svc.neighbors("Dog", relation="CALL", hops=3)
     svc.close()
+
+
+def test_neighbors_surface_edge_confidence(tmp_path):
+    """G6-4: the EXTRACTED/INFERRED honesty lives in the graph — agents must see it
+    on every labeled edge (calls/callers/neighbors)."""
+    from cartograph.pipeline import index_path
+    from cartograph.service import CartographService
+
+    fix = Path(__file__).parent / "fixtures" / "sample.py"
+    db = tmp_path / "g.kuzu"
+    index_path(fix, db, dim=32, overwrite=True).close()
+    svc = CartographService(db)
+    # CALLS edges are heuristic → INFERRED
+    callers = svc.callers("bark")
+    assert callers and all(c["confidence"] in ("EXTRACTED", "INFERRED") for c in callers)
+    assert any(c["confidence"] == "INFERRED" for c in callers)  # speak->bark is a heuristic call
+    # CONTAINS is deterministic structure → EXTRACTED
+    contained = svc.neighbors("Dog", direction="out", relation="CONTAINS")
+    assert contained and all(c["confidence"] == "EXTRACTED" for c in contained)
+    svc.close()

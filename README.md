@@ -68,9 +68,12 @@ Code tools stop at code; data-lineage tools stop at SQL. Cartograph holds both, 
 cartograph impact users.email    # a column/table → every code path that can reach it
 cartograph impact store_run      # a function → every table/column it can touch
 ```
-Every result carries a machine-readable `completeness` block (it's advisory, never a
-proof): the call-graph expansion is heuristic, ORM attribute access may be missed, and
-FK/JOIN ripple between tables isn't followed yet. Honest by construction.
+The radius follows the call graph, the ORM/SQL bridge (including `self.<column>`
+reads), and **FK/JOIN ripple** — dropping a table also surfaces code touching tables
+that reference it. Every result carries a machine-readable `completeness` block (it's
+advisory, never a proof): each remaining gap — heuristic calls, cross-instance
+attribute access, undeclared foreign keys — is reported as a structured code an agent
+can branch on. Honest by construction.
 
 ## See it
 Export an interactive **3D map** of any graph to one self-contained, offline HTML file —

@@ -137,7 +137,7 @@ def _echo_nodes(nodes: list[dict], empty_msg: str) -> None:
         typer.echo(empty_msg)
         return
     for n in nodes:
-        rel = f" <{n['relation']}:{n['direction']}>" if "relation" in n else ""
+        rel = f" <{n['relation']}:{n['direction']} {n['confidence']}>" if "relation" in n else ""
         typer.echo(f"[{n['kind']}] {n['qualified_name']}{rel}  ({n['file_path']}:{n['start_line']})")
         if n.get("signature"):
             typer.echo(f"    {n['signature']}")

@@ -249,6 +249,14 @@ class Store:
                         "embed_text": r[4], "docstring": r[5]})
         return out
 
+    def ids_of_kind(self, kind: str) -> set[str]:
+        """Node ids of a given kind (e.g. 'table') — small targeted lookup."""
+        res = self.conn.execute("MATCH (c:CodeNode {kind:$k}) RETURN c.id", {"k": kind})
+        out: set[str] = set()
+        while res.has_next():
+            out.add(res.get_next()[0])
+        return out
+
     def all_embeddings(self) -> tuple[list[str], list[list[float]]]:
         res = self.conn.execute("MATCH (c:CodeNode) RETURN c.id, c.embedding")
         ids: list[str] = []
@@ -354,20 +362,27 @@ class Store:
         unknown = [t for t in types if t not in EDGE_TYPES]
         if unknown:
             raise ValueError(f"unknown relation(s) {unknown}; valid: {sorted(EDGE_TYPES)}")
+        # CONTAINS/DOCUMENTS are deterministic structure (no confidence column) →
+        # EXTRACTED; the rest carry an EXTRACTED/INFERRED tag the agent should see.
         out: list[dict] = []
         for et in types:
+            conf_sel = "'EXTRACTED'" if et in ("CONTAINS", "DOCUMENTS") else "r.confidence"
             if direction in ("out", "both"):
                 res = self.conn.execute(
-                    f"MATCH (a:CodeNode {{id:$id}})-[:{et}]->(b:CodeNode) RETURN DISTINCT b.id", {"id": node_id}
-                )
+                    f"MATCH (a:CodeNode {{id:$id}})-[r:{et}]->(b:CodeNode) "
+                    f"RETURN DISTINCT b.id, {conf_sel}", {"id": node_id})
                 while res.has_next():
-                    out.append({"relation": et, "direction": "out", "id": res.get_next()[0]})
+                    row = res.get_next()
+                    out.append({"relation": et, "direction": "out", "id": row[0],
+                                "confidence": row[1] or "EXTRACTED"})
             if direction in ("in", "both"):
                 res = self.conn.execute(
-                    f"MATCH (a:CodeNode)-[:{et}]->(b:CodeNode {{id:$id}}) RETURN DISTINCT a.id", {"id": node_id}
-                )
+                    f"MATCH (a:CodeNode)-[r:{et}]->(b:CodeNode {{id:$id}}) "
+                    f"RETURN DISTINCT a.id, {conf_sel}", {"id": node_id})
                 while res.has_next():
-                    out.append({"relation": et, "direction": "in", "id": res.get_next()[0]})
+                    row = res.get_next()
+                    out.append({"relation": et, "direction": "in", "id": row[0],
+                                "confidence": row[1] or "EXTRACTED"})
         return out
 
     def neighbors(self, node_id: str, hops: int = 1) -> list[str]:

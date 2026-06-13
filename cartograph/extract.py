@@ -102,6 +102,7 @@ class _FileExtractor:
         self.bases: list[tuple[str, str]] = []  # (class_id, base_name)
         self.imports: list[tuple[str, str]] = []  # (module_id, imported_name)
         self.sql_strings: list[tuple[str, str]] = []  # (owner_id, sql_text) — SQL in string literals
+        self.self_attrs: list[tuple[str, str]] = []  # (method_id, attr) — `self.x` reads (G6-3 ORM bridge)
 
     # -- node factory ---------------------------------------------------------
     def _add(self, kind: str, name: str, qualified_name: str, node: TSNode, body: TSNode | None) -> Node:
@@ -269,6 +270,15 @@ class _FileExtractor:
             self._collect_sql(child, owner_id)
 
     def _collect_calls(self, node: TSNode, caller_id: str) -> None:
+        # `self.x` / `cls.x` attribute reads — bridged to a column if the owning
+        # class is ORM-mapped (G6-3). Method calls like `self.run()` also match here
+        # but harmlessly: the bridge only emits an edge when `x` is a real column.
+        if node.type == "attribute":
+            obj = node.child_by_field_name("object")
+            attr = node.child_by_field_name("attribute")
+            if (obj is not None and obj.type == "identifier"
+                    and _text(self.src, obj) in ("self", "cls") and attr is not None):
+                self.self_attrs.append((caller_id, _text(self.src, attr)))
         if node.type == "call":
             func = node.child_by_field_name("function")
             if func is not None:
@@ -441,6 +451,14 @@ def extract_paths(paths: list[Path], root: Path, resolver: str = "heuristic") ->
 
     resolve_inherits(((cls_id, base) for fx in extractors for cls_id, base in fx.bases),
                      name_index, by_id, _module_of, ("class",), seen, edges)
+
+    # Stash `self.x` reads on each method node so the ORM bridge (build_graph) can
+    # link them to columns of the method's mapped class (G6-3).
+    for fx in extractors:
+        for method_id, attr in fx.self_attrs:
+            n = by_id.get(method_id)
+            if n is not None:
+                n.extra.setdefault("self_attrs", set()).add(attr)
 
     # Resolve imports: internal module if known, else an external module node.
     ext_nodes: dict[str, Node] = {}
