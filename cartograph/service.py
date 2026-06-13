@@ -291,9 +291,10 @@ class CartographService:
         "orm_attribute_access": "attribute access on a mapped model instance "
                                "(e.g. other_obj.email) needs type inference; code "
                                "touching a column only that way may be absent",
-        "undeclared_schema_links": "only FK / JOIN relationships present in the "
-                                  "indexed schema are followed; convention-only or "
-                                  "unindexed foreign keys are not",
+        "undeclared_schema_links": "FK ripple is followed at table granularity (a "
+                                  "column drop pulls in code for any FK on the table), "
+                                  "JOIN-derived links are heuristic, and convention-only "
+                                  "or unindexed foreign keys are not followed at all",
     }
 
     def _impact_completeness(self, direction: str) -> dict:
