@@ -371,13 +371,32 @@ class Store:
         return out
 
     def neighbors(self, node_id: str, hops: int = 1) -> list[str]:
-        res = self.conn.execute(
-            f"MATCH (a:CodeNode {{id:$id}})-[*1..{hops}]-(b:CodeNode) RETURN DISTINCT b.id",
-            {"id": node_id},
-        )
-        out = []
-        while res.has_next():
-            out.append(res.get_next()[0])
+        """Iterative BFS over 1-hop queries. A single variable-length match
+        (`-[*1..h]-`) makes Kuzu enumerate every PATH, which exhausts the buffer
+        pool on a dense hub (seen live: httpx Client.send at hops=8 — "Buffer
+        manager exception"). Frontier expansion is bounded by the visited set
+        — memory scales with nodes reached, not paths."""
+        visited = {node_id}
+        frontier = [node_id]
+        out: list[str] = []
+        for _ in range(max(1, hops)):
+            if not frontier:
+                break
+            nxt: list[str] = []
+            for nid in frontier:
+                res = self.conn.execute(
+                    "MATCH (a:CodeNode {id:$id})-[]-(b:CodeNode) RETURN DISTINCT b.id",
+                    {"id": nid})
+                fresh = []
+                while res.has_next():
+                    b = res.get_next()[0]
+                    if b not in visited:
+                        visited.add(b)
+                        fresh.append(b)
+                fresh.sort()  # deterministic expansion order
+                nxt.extend(fresh)
+                out.extend(fresh)
+            frontier = nxt
         return out
 
     def shortest_path(self, src: str, dst: str, max_hops: int = 8) -> list[str]:
