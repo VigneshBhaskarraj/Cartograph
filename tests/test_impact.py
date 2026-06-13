@@ -111,3 +111,29 @@ def test_module_impact_descends_scope(repo_db):
     names = {n["qualified_name"] for n in r["direct_data"] + r["transitive_data"]}
     assert "users" in names
     assert r["total_data_touched"] >= 1
+
+
+def test_impact_carries_machine_readable_completeness(repo_db):
+    """G6-1: every impact result must flag that it is not exhaustive, with
+    structured limitation codes an agent can branch on (the bank-pilot condition)."""
+    svc = CartographService(repo_db)
+    data_to_code = svc.impact("users.email")
+    code_to_data = svc.impact("entrypoint")
+    svc.close()
+    for r in (data_to_code, code_to_data):
+        c = r["completeness"]
+        assert c["exhaustive"] is False and c["advisory_only"] is True
+        codes = {lim["code"] for lim in c["limitations"]}
+        assert {"inferred_calls", "orm_attribute_access"} <= codes
+        assert all(lim["detail"] for lim in c["limitations"])  # every code is explained
+    # FK/JOIN ripple only applies when starting from data (dropping a table can
+    # break FK-linked tables); it must NOT be claimed in the code->data direction.
+    assert "fk_join_ripple" in {l["code"] for l in data_to_code["completeness"]["limitations"]}
+    assert "fk_join_ripple" not in {l["code"] for l in code_to_data["completeness"]["limitations"]}
+
+
+def test_impact_cli_shows_completeness(repo_db):
+    r = runner.invoke(app, ["impact", "users.email", "--db", str(repo_db)])
+    assert r.exit_code == 0
+    assert "NOT EXHAUSTIVE" in r.output and "advisory only" in r.output
+    assert "inferred_calls" in r.output and "fk_join_ripple" in r.output

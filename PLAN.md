@@ -483,6 +483,44 @@ corpus joins the eval set); viz `layout_3d` O(n²) memory guard; viz title escap
 
 ---
 
+## Gate-6 — "impact you can trust" (added 2026-06-13)
+The review panel's unanimous #1 and the bank-pilot's #1 condition: `impact` is the
+moat feature, and its honesty/completeness is what a high-stakes (schema-migration)
+workflow needs. The keep of the moat, hardened.
+
+### G6-1 — Machine-readable completeness ✅ DONE 2026-06-13
+- **Files:** `cartograph/service.py`, `cartograph/cli.py`, `cartograph/mcp_server.py`,
+  `tests/test_impact.py`
+- **Does:** every `impact` result carries a `completeness` block —
+  `{exhaustive: false, advisory_only: true, limitations: [{code, detail}]}` with
+  structured codes (`inferred_calls`, `orm_attribute_access`, `fk_join_ripple`) an
+  agent can branch on instead of parsing prose. Purely additive (no change to which
+  nodes are returned), so **eval-neutral**. CLI prints it; MCP docstring documents it.
+- **Verify:** `uv run pytest tests/test_impact.py -q` (158 tests total green).
+
+### G6-2 — FK/JOIN ripple (PLANNED — eval-gated, needs approval) ⏳
+- **Does:** `impact` on a table/column follows one hop of incoming `REFERENCES`
+  (and optionally `JOINS`) so dropping `users` surfaces the code touching
+  `audit.user_id`. Then `fk_join_ripple` can be removed from that result's
+  limitations. **Changes results → ships with scorecard numbers** (bridge corpus has
+  the `audit→users` FK to ground-truth it).
+
+### G6-3 — ORM attribute capture (PLANNED — eval-gated, needs approval) ⏳
+- **Does:** model-field access (`self.email`, getters) on a mapped class emits a
+  column-level edge, closing the documented `orm_attribute_access` false-negative.
+  Result-changing → eval-gated.
+
+### G6-4 — Per-edge confidence in responses (PLANNED) ⏳
+- **Does:** tag each `impact`/`neighbors` result node with the confidence of the edge
+  that reached it (EXTRACTED vs INFERRED) — the honesty is in the graph but agents
+  can't currently see it (code-intel reviewer's finding). Additive.
+
+**Status:** G6-1 shipped. G6-2/G6-3 change the blast radius and so are held for
+approval per the eval-first rule (no retrieval/graph-semantics change lands without a
+number that moved). G6-4 is additive and can follow G6-1.
+
+---
+
 ## Implementation notes — deviations from this plan (M0/M1 as shipped)
 Recorded so the drift from the approved plan is explicit (not silent):
 1. **Node `id` format** is `<file>::<qualified_name>#<line>`, not `<file>::<qualified_name>`.
