@@ -65,7 +65,14 @@ def open_graph(db_path: str | Path, read_only: bool = True) -> Store:
     version = store.get_meta("schema_version") if not missing else None
     if missing and missing <= set(EDGE_TYPES) and store.get_meta("schema_version") in (None, SCHEMA_VERSION):
         # Only rel tables are absent and the recorded version (if any) matches:
-        # self-heal in place rather than demanding a re-index.
+        # self-heal in place rather than demanding a re-index. A version of None
+        # is deliberately healable here even though the gate below treats
+        # missing-version-with-all-tables as incompatible: graphs missing these
+        # rel tables PREDATE the version meta entirely (the tables and the meta
+        # landed in that order), so None is their expected fingerprint — and the
+        # column gate below still validates the healed graph's structure before
+        # admitting it. A versionless graph with all tables has no such
+        # provenance story, so it stays rejected.
         store.close()
         try:
             _heal_missing_rel_tables(p, missing)
@@ -239,6 +246,13 @@ class CartographService:
         out-of-range values note the clamp in a trailing sentinel instead of erroring
         (Kuzu hard-crashes above 30, and a hub node's full neighborhood would flood
         an agent's context). Unknown refs raise with 'did you mean' candidates."""
+        # Validate filters for EVERY hops value: the multi-hop expansion ignores
+        # them by design (unlabeled), but a typo'd value must still be an error,
+        # not silently dropped (review follow-up on G5-A2).
+        if direction not in ("out", "in", "both"):
+            raise ValueError(f"direction must be one of ['both', 'in', 'out'], got {direction!r}")
+        if relation is not None and relation.upper() not in EDGE_TYPES:
+            raise ValueError(f"unknown relation {relation!r}; valid: {sorted(EDGE_TYPES)}")
         rid = self._rid_or_raise(node_id)
         clamped = max(1, min(int(hops), MAX_HOPS))
         if clamped <= 1:

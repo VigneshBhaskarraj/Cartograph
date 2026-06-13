@@ -86,3 +86,23 @@ def test_call_tool_round_trips_and_error_paths(tmp_path):
         asyncio.run(server.call_tool("neighbors", {"id": "Dog", "direction": "sideways"}))
     with pytest.raises(Exception, match="no node matches"):
         asyncio.run(server.call_tool("calls", {"id": "does.not.exist"}))
+
+
+def test_versionless_old_graph_heals_too(tmp_path):
+    """Review follow-up: the REAL incident graph predates the schema_version
+    meta entirely (rel tables and version meta landed in that order), so the
+    heal path must accept version=None — while the gate still rejects a
+    versionless graph that has all its tables (no provenance story)."""
+    import kuzu
+
+    db = tmp_path / "g.kuzu"
+    index_path(FIX, db, dim=64, overwrite=True).close()
+    conn = kuzu.Connection(kuzu.Database(str(db)))
+    conn.execute("DROP TABLE QUERIES")
+    conn.execute("DROP TABLE JOINS")
+    conn.execute("MATCH (m:Meta) WHERE m.key = 'schema_version' DELETE m")
+    conn.close()
+
+    service = CartographService(db)  # heals, stamps, admits
+    assert service.store.get_meta("schema_version") is not None
+    service.store.close()

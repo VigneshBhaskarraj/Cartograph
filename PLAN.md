@@ -305,7 +305,7 @@ Closing the three publish-blockers: no external baseline, no agent benchmark,
 - Scale agent bench beyond n=12 and run with a weaker local model, where accuracy
   (not just efficiency) gaps are expected to appear.
 
-## Gate-5 — Hardening (added 2026-06-12)
+## Gate-5 — Hardening (added 2026-06-12) ✅ DONE 2026-06-12
 Trigger: the local MCP server died with "Connection closed" — root cause was a
 pre-G4-1 graph missing the empty JOINS/QUERIES rel tables (fixed operationally by
 running the two `schema_ddl()` statements against `httpx-ollama.kuzu`). A three-agent
@@ -313,6 +313,14 @@ review of the full codebase followed; this gate is the prioritized result. Three
 tracks: **A** interface robustness, **B** index/store integrity, **C** extractor
 correctness. Track C tasks marked **[eval-first]** change graph edges and must ship
 with before/after scorecard numbers (CLAUDE.md directive 3), not just passing tests.
+
+> **Closed 2026-06-12.** All 14 tasks landed (A1-A4, B1-B4, C1-C6) across five
+> commits; 155 tests green (was 127). Independent fresh-context review (directive
+> 6): **GO** — all tasks verified implemented; its three follow-up findings
+> (heal-policy documentation + versionless-heal test, dirty-rebuild `use_cache`
+> plumbing, multi-hop filter validation) fixed and tested in the closing commit.
+> C5 verified byte-identical: node/edge dumps over all 6 corpora, zero diff.
+> Eval: zero regression anywhere; petclinic graph mrr 0.386 → 0.400 (C3).
 
 ### Track A — MCP/CLI robustness
 

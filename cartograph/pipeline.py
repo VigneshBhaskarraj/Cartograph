@@ -387,7 +387,8 @@ def update_index(path: Path, db_path: Path, dim: int = DEFAULT_DIM, embedder=Non
         # A previous index/update died mid-write: the row-level delta below would
         # diff against a half-written graph. A full rebuild is the deterministic
         # repair (embeddings come from the cache, so it's cheap).
-        st = index_path(path, db_path, dim=dim, embedder=embedder, overwrite=True, resolver=resolver)
+        st = index_path(path, db_path, dim=dim, embedder=embedder, overwrite=True,
+                        resolver=resolver, use_cache=use_cache)
         reused, embedded = getattr(st, "cache_stats", (0, 0))
         st.close()
         return {"status": "rebuilt", **delta, "embedded": embedded, "reused": reused,

@@ -235,3 +235,14 @@ def test_schema_gate_requires_meta_table(tmp_path):
     conn.close()
     with pytest.raises(RuntimeError, match="missing tables: Meta"):
         open_graph(tmp_path / "g.kuzu")
+
+
+def test_invalid_filters_raise_even_multihop(db):
+    """Review follow-up: hops>1 ignores filters by design (unlabeled expansion),
+    but a typo'd filter must still raise, not silently drop."""
+    svc = CartographService(db)
+    with pytest.raises(ValueError, match="direction"):
+        svc.neighbors("Dog", direction="sideways", hops=3)
+    with pytest.raises(ValueError, match="relation"):
+        svc.neighbors("Dog", relation="CALL", hops=3)
+    svc.close()

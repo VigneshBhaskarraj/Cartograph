@@ -222,3 +222,17 @@ def test_moved_sql_table_keeps_correct_position(tmp_path):
         "MATCH (c:CodeNode) WHERE c.kind = 'table' AND c.name = 'users' RETURN c.start_line")
     assert res.get_next()[0] == 4  # the new position, not the stale line 1
     store.close()
+
+
+def test_dirty_rebuild_honors_no_cache(tmp_path):
+    """Review follow-up: the dirty-graph rebuild used to drop use_cache=False —
+    `cartograph update --no-cache` on a dirty graph silently reused the cache."""
+    repo = _repo(tmp_path, {"a.py": "def f():\n    return 1\n"})
+    db = tmp_path / "g.kuzu"
+    index_path(repo, db, dim=32, overwrite=True).close()  # populates the cache
+    s = Store(db)
+    s.set_meta("dirty", "1")
+    s.close()
+    summary = update_index(repo, db, dim=32, use_cache=False)
+    assert summary["status"] == "rebuilt"
+    assert summary["reused"] == 0  # nothing came from the cache
