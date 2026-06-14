@@ -1,6 +1,6 @@
 [project]
 name = "cartograph"
-version = "0.0.1"
+version = "0.1.0"
 description = "Local-first hybrid retrieval over your codebase — a queryable knowledge graph for AI coding agents, fully offline."
 readme = "README.md"
 requires-python = ">=3.12"

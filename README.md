@@ -24,7 +24,7 @@ uv run cartograph impact users.email     # → the columns, the code, and its tr
 - The graph is served over **MCP**, so any coding agent (Claude Code, etc.) can query structure-aware context on demand.
 
 ## Install
-macOS / Linux, Python 3.12+. Everything runs offline.
+macOS / Linux, Python 3.12+. Everything runs offline. (Windows: use WSL — not yet tested natively.)
 ```bash
 uv tool install "cartograph[mcp,sql,ts,java,go] @ git+https://github.com/VigneshBhaskarraj/Cartograph"
 cartograph --help
