@@ -36,6 +36,11 @@ cartograph-out/
 # --- Local scratch / models ---
 .cartograph/
 
+# --- Private prep / strategy notes (never publish to the public repo) ---
+CARTOGRAPH_PARTNER_BRIEF.md
+*_BRIEF.md
+*.private.md
+
 # --- MCP local config (machine-specific absolute paths) ---
 .mcp.json
 
